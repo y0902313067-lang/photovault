@@ -36,6 +36,7 @@ struct RootView: View {
             switch store.stage {
             case .register:  RegisterView()
             case .avatar:    AvatarView()
+            case .splash:    SplashView()
             case .home:      HomeView()
             }
         }
@@ -496,6 +497,53 @@ struct AvatarView: View {
                     await MainActor.run { store.setAvatar(img) }
                 }
             }
+        }
+    }
+}
+
+// MARK: - 品牌過渡頁（註冊 / 登入完成的那一瞬間，不等任何上傳）
+
+struct SplashView: View {
+    @State private var breathe = false
+    @State private var sweep = false
+
+    var body: some View {
+        ZStack {
+            Backdrop()
+
+            VStack(spacing: 20) {
+                MintDragonMark(size: 132, asset: "MintDragonBrand")
+                    .scaleEffect(breathe ? 1.03 : 0.99)
+                    .shadow(color: Brand.mint.opacity(0.35), radius: 28)
+
+                VStack(spacing: 5) {
+                    Text("薄荷龍科技")
+                        .font(.system(size: 19, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text("MINT DRAGON TECHNOLOGY")
+                        .font(.system(size: 8.5, weight: .medium))
+                        .tracking(2.1)
+                        .foregroundStyle(Brand.mint.opacity(0.7))
+                }
+
+                Capsule()
+                    .fill(Color.white.opacity(0.10))
+                    .frame(width: 92, height: 3)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [.clear, Brand.mint.opacity(0.9), .clear],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: 46, height: 3)
+                            .offset(x: sweep ? 46 : -46)
+                    }
+                    .mask(Capsule())
+                    .padding(.top, 4)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true }
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { sweep = true }
         }
     }
 }

@@ -31,6 +31,7 @@ final class AppStore: ObservableObject {
     enum Stage: Equatable {
         case register      // 注册
         case avatar        // 设置头像
+        case splash        // 建好帳號後的品牌過渡頁（不到 1 秒，不等任何上傳）
         case home          // 主页
     }
 
@@ -170,6 +171,8 @@ final class AppStore: ObservableObject {
                 }
                 persistAvatar()
                 errorText = nil
+                stage = .splash
+                try? await Task.sleep(nanoseconds: 700_000_000)
                 stage = .home
             } catch {
                 errorText = error.localizedDescription
@@ -212,6 +215,8 @@ final class AppStore: ObservableObject {
             defer { running = false }
             let ok = await prepareAccount()
             guard ok else { return }        // 失敗就留在頭像頁顯示錯誤，讓用戶重試
+            stage = .splash
+            try? await Task.sleep(nanoseconds: 900_000_000)
             stage = .home
         }
     }
