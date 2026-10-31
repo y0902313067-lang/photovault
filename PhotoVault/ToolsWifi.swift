@@ -30,15 +30,12 @@ enum PortalState {
 final class WifiModel: ObservableObject {
     @Published var snap = WifiSnapshot()
     @Published var scanning = false
-    @Published var notifOn = UserDefaults.standard.bool(forKey: "md.wifi.notify")
-    @Published var toast: String? = nil
     @Published var locationAllowed = false
     @Published var onWifi = false
     @Published var latencyMs: Int? = nil
     @Published var portal: PortalState = .unknown
     @Published var probeRunning = false
 
-    private var notifiedSSID: String? = nil
     private var locManager: CLLocationManager?
     private let pathMonitor = NWPathMonitor()
 
@@ -95,7 +92,6 @@ final class WifiModel: ObservableObject {
         dict[ssid] = secure
         UserDefaults.standard.set(dict, forKey: "md.wifi.manual")
         snap.secure = secure
-        evaluateNotification()
     }
 
     private func applyManualMark() {
@@ -129,7 +125,6 @@ final class WifiModel: ObservableObject {
             self.snap = snap
             self.applyManualMark()
             self.scanning = false
-            self.evaluateNotification()
         }
         probeConnectivity()
     }
@@ -190,38 +185,6 @@ final class WifiModel: ObservableObject {
         }
     }
 
-    func setNotif(_ on: Bool) {
-        notifOn = on
-        UserDefaults.standard.set(on, forKey: "md.wifi.notify")
-        if on {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-            notifiedSSID = nil
-            evaluateNotification()
-        }
-    }
-
-    private func evaluateNotification() {
-        guard notifOn, let ssid = snap.ssid, snap.secure == false else { return }
-        guard notifiedSSID != ssid else { return }
-        notifiedSSID = ssid
-
-        let content = UNMutableNotificationContent()
-        content.title = "偵測到免密碼 Wi-Fi"
-        content.body = "「\(ssid)」是開放網路，任何人不用密碼就能連上，傳資料要小心。"
-        content.sound = .default
-
-        let req = UNNotificationRequest(identifier: "md.wifi.open.\(UUID().uuidString)",
-                                        content: content,
-                                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
-        UNUserNotificationCenter.current().add(req)
-
-        toast = "已發出提醒：\(ssid)"
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_600_000_000)
-            self.toast = nil
-        }
-    }
-
     static func localWiFiAddress() -> String? {
         var address: String?
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
@@ -266,8 +229,6 @@ struct WifiCheckView: View {
             }
 
             connectionCard
-
-            notifyCard
 
             detailsCard
 
@@ -377,12 +338,6 @@ struct WifiCheckView: View {
                     }
                     .buttonStyle(.plain)
                 }
-            }
-
-            if let toast = model.toast {
-                Text(toast)
-                    .font(.system(size: 11))
-                    .foregroundStyle(TT.mint.opacity(0.9))
             }
         }
         .padding(16)
@@ -529,41 +484,6 @@ struct WifiCheckView: View {
             .font(.system(size: 11.5))
             .foregroundStyle(accent.opacity(0.85))
             .fixedSize(horizontal: false, vertical: true)
-    }
-
-    // MARK: 通知
-
-    private var notifyCard: some View {
-        TTPanel(accent: TT.teal) {
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle(isOn: Binding(get: { model.notifOn },
-                                     set: { model.setNotif($0) })) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 7) {
-                            Image(systemName: "bell.badge")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(TT.teal)
-                            Text("免密碼 Wi-Fi 通知")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                        }
-                        Text("偵測到目前連的網路不用密碼時，發一則通知提醒你")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                }
-                .toggleStyle(SwitchToggleStyle(tint: TT.teal))
-
-                HStack(spacing: 6) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 9))
-                    Text("App 開著時每 30 秒自動巡一次；切到背景後系統不允許常駐監測")
-                        .font(.system(size: 10))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .foregroundStyle(.white.opacity(0.28))
-            }
-        }
     }
 
     // MARK: 詳細資料

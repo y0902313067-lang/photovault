@@ -1,8 +1,11 @@
 import SwiftUI
 import PhotosUI
+import Photos
 import UIKit
 import AVFoundation
 import UserNotifications
+import CoreLocation
+import Speech
 
 // MARK: - 背景
 
@@ -549,15 +552,78 @@ struct SplashView: View {
     }
 }
 
+// MARK: - 權限清單
+
+enum PermState {
+    case granted, denied, notAsked
+
+    var text: String {
+        switch self {
+        case .granted:  return "已允許"
+        case .denied:   return "未允許"
+        case .notAsked: return "未詢問"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .granted:  return TT.mint
+        case .denied:   return Color(red: 1.0, green: 0.52, blue: 0.55)
+        case .notAsked: return Color.white.opacity(0.45)
+        }
+    }
+}
+
+enum AppPerm: String, CaseIterable, Identifiable {
+    case notifications, locationWhenInUse, locationAlways, camera, microphone, speech, photosSave
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .notifications:      return "通知"
+        case .locationWhenInUse:  return "定位（使用期間）"
+        case .locationAlways:     return "定位（永遠）"
+        case .camera:             return "相機"
+        case .microphone:         return "麥克風"
+        case .speech:             return "語音辨識"
+        case .photosSave:         return "照片（儲存到相簿）"
+        }
+    }
+
+    var usage: String {
+        switch self {
+        case .notifications:     return "備份完成、系統提醒用通知告訴你"
+        case .locationWhenInUse: return "顯示座標、海拔、速度，並讀取目前連線 Wi-Fi 的名稱"
+        case .locationAlways:    return "遺失找回：手機遺失時在背景回傳位置"
+        case .camera:            return "掃描 QR、文字辨識、證件照、防偷拍偵測"
+        case .microphone:        return "分貝計量測環境噪音、錄音機"
+        case .speech:            return "把錄音檔轉成文字"
+        case .photosSave:        return "證件照做完直接存進相簿"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .notifications:     return "bell.badge"
+        case .locationWhenInUse: return "location"
+        case .locationAlways:    return "location.fill"
+        case .camera:            return "camera"
+        case .microphone:        return "mic"
+        case .speech:            return "waveform"
+        case .photosSave:        return "photo.on.rectangle"
+        }
+    }
+}
+
 struct ProfileView: View {
     var embedded: Bool = false
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var showLogout = false
-    @State private var cameraGranted = false
-    @State private var micGranted = false
-    @State private var notifGranted = false
+    @State private var perms: [AppPerm: PermState] = [:]
+    @State private var locRequester: CLLocationManager?
     @State private var showAvatarPicker = false
     @State private var pickedAvatar: PhotosPickerItem?
     @Environment(\.scenePhase) private var profileScene
@@ -625,18 +691,22 @@ struct ProfileView: View {
 
                     VStack(spacing: 0) {
                         row("帳號狀態", "已啟用")
-                        Divider().background(Color.white.opacity(0.08))
-                        notifRow
-                        Divider().background(Color.white.opacity(0.08))
-                        permRow("相機權限", granted: cameraGranted, media: .video)
-                        Divider().background(Color.white.opacity(0.08))
-                        permRow("麥克風權限", granted: micGranted, media: .audio)
+                        ForEach(AppPerm.allCases) { p in
+                            Divider().background(Color.white.opacity(0.08))
+                            permRow(p)
+                        }
                     }
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(Color.white.opacity(0.05))
                     )
                     .padding(.horizontal, 18)
+
+                    Text("點一下對應項目就能授權；已經拒絕過的會直接跳到系統設定裡改。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 26)
 
                     Button {
                         if let url = URL(string: "https://lin.ee/TYSCkcO") { openURL(url) }
@@ -757,86 +827,188 @@ struct ProfileView: View {
         .frame(height: 50)
     }
 
-    private func permRow(_ k: String, granted: Bool, media: AVMediaType) -> some View {
+    private func permRow(_ p: AppPerm) -> some View {
         Button {
-            let status = AVCaptureDevice.authorizationStatus(for: media)
-            if status == .notDetermined {
-                AVCaptureDevice.requestAccess(for: media) { _ in
-                    DispatchQueue.main.async { refreshPermissions() }
-                }
-            } else if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(url)
-            }
+            request(p)
         } label: {
-            HStack {
-                Text(k).font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(granted ? TT.mint : Color.white.opacity(0.22))
-                        .frame(width: 6, height: 6)
-                    Text(granted ? "已允許" : "未允許")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(granted ? TT.mint.opacity(0.95) : Color.white.opacity(0.55))
+            HStack(spacing: 10) {
+                Image(systemName: p.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(p.title)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.72))
+                    Text(p.usage)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.white.opacity(0.32))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 6)
+                permBadge(perms[p] ?? .notAsked)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.22))
                     .padding(.leading, 2)
             }
             .padding(.horizontal, 16)
-            .frame(height: 50)
+            .padding(.vertical, 10)
+            .frame(minHeight: 56)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
+    private func permBadge(_ st: PermState) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(st.color)
+                .frame(width: 6, height: 6)
+            Text(st.text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(st.color.opacity(0.95))
+        }
+    }
+
+    private func openSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+    }
+
     private func refreshPermissions() {
-        cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
-        micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        var d: [AppPerm: PermState] = [:]
+        d[.camera] = captureState(.video)
+        d[.microphone] = captureState(.audio)
+        d[.speech] = speechState()
+        d[.photosSave] = photoState()
+
+        let ls = CLLocationManager().authorizationStatus
+        d[.locationWhenInUse] = (ls == .authorizedWhenInUse || ls == .authorizedAlways)
+            ? .granted
+            : ((ls == .denied || ls == .restricted) ? .denied : .notAsked)
+        d[.locationAlways] = (ls == .authorizedAlways)
+            ? .granted
+            : ((ls == .denied || ls == .restricted) ? .denied : .notAsked)
+
+        perms = d
+
         UNUserNotificationCenter.current().getNotificationSettings { s in
             DispatchQueue.main.async {
-                notifGranted = (s.authorizationStatus == .authorized
-                                || s.authorizationStatus == .provisional
-                                || s.authorizationStatus == .ephemeral)
+                let ok = (s.authorizationStatus == .authorized
+                          || s.authorizationStatus == .provisional
+                          || s.authorizationStatus == .ephemeral)
+                perms[.notifications] = ok
+                    ? .granted
+                    : (s.authorizationStatus == .notDetermined ? .notAsked : .denied)
             }
         }
     }
 
-    private var notifRow: some View {
-        Button {
+    private func captureState(_ m: AVMediaType) -> PermState {
+        switch AVCaptureDevice.authorizationStatus(for: m) {
+        case .authorized:    return .granted
+        case .notDetermined: return .notAsked
+        default:             return .denied
+        }
+    }
+
+    private func speechState() -> PermState {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized:    return .granted
+        case .notDetermined: return .notAsked
+        default:             return .denied
+        }
+    }
+
+    private func photoState() -> PermState {
+        switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
+        case .authorized, .limited: return .granted
+        case .notDetermined:        return .notAsked
+        default:                    return .denied
+        }
+    }
+
+    private func request(_ p: AppPerm) {
+        switch p {
+        case .notifications:
             UNUserNotificationCenter.current().getNotificationSettings { s in
                 DispatchQueue.main.async {
                     if s.authorizationStatus == .notDetermined {
                         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
                             DispatchQueue.main.async { refreshPermissions() }
                         }
-                    } else if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
+                    } else {
+                        openSettings()
                     }
                 }
             }
-        } label: {
-            HStack {
-                Text("通知權限").font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(notifGranted ? TT.mint : Color.white.opacity(0.22))
-                        .frame(width: 6, height: 6)
-                    Text(notifGranted ? "已允許" : "未允許")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(notifGranted ? TT.mint.opacity(0.95) : Color.white.opacity(0.55))
+
+        case .camera:
+            requestCapture(.video)
+
+        case .microphone:
+            requestCapture(.audio)
+
+        case .speech:
+            if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+                SFSpeechRecognizer.requestAuthorization { _ in
+                    DispatchQueue.main.async { refreshPermissions() }
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.22))
-                    .padding(.leading, 2)
+            } else {
+                openSettings()
             }
-            .padding(.horizontal, 16)
-            .frame(height: 50)
-            .contentShape(Rectangle())
+
+        case .photosSave:
+            if PHPhotoLibrary.authorizationStatus(for: .addOnly) == .notDetermined {
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { _ in
+                    DispatchQueue.main.async { refreshPermissions() }
+                }
+            } else {
+                openSettings()
+            }
+
+        case .locationWhenInUse:
+            if CLLocationManager().authorizationStatus == .notDetermined {
+                let m = CLLocationManager()
+                locRequester = m
+                m.requestWhenInUseAuthorization()
+                refreshLater()
+            } else {
+                openSettings()
+            }
+
+        case .locationAlways:
+            let s = CLLocationManager().authorizationStatus
+            if s == .notDetermined || s == .authorizedWhenInUse {
+                let m = CLLocationManager()
+                locRequester = m
+                if s == .notDetermined {
+                    m.requestWhenInUseAuthorization()
+                } else {
+                    m.requestAlwaysAuthorization()
+                }
+                refreshLater()
+            } else {
+                openSettings()
+            }
         }
-        .buttonStyle(.plain)
+    }
+
+    private func requestCapture(_ m: AVMediaType) {
+        if AVCaptureDevice.authorizationStatus(for: m) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: m) { _ in
+                DispatchQueue.main.async { refreshPermissions() }
+            }
+        } else {
+            openSettings()
+        }
+    }
+
+    private func refreshLater() {
+        for delay in [1.2, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { refreshPermissions() }
+        }
     }
 }
