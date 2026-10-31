@@ -38,6 +38,43 @@ final class OCRModel: ObservableObject {
     @Published var autoLanguage = true
     @Published var elapsed: Double = 0
     @Published var regionMode = false
+    @Published var codes: [String] = []
+    @Published var links: [String] = []
+
+    static func extractLinks(_ text: String) -> [String] {
+        let pattern = "(?i)\\b(?:https?://|www\\.)[^\\s，。、；）】」》,;\"']+"
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        let matches = re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        var out: [String] = []
+        for m in matches {
+            var s = ns.substring(with: m.range)
+            while let last = s.last, ".,;:)]}，。、".contains(last) {
+                s.removeLast()
+            }
+            if s.count > 4, !out.contains(s) { out.append(s) }
+        }
+        return out
+    }
+
+    var summary: String {
+        let text = joined.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+        let separators = CharacterSet(charactersIn: "。！？!?.\n")
+        let sentences = text.components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 8 }
+        var picked: [String] = []
+        var total = 0
+        for s in sentences {
+            if total + s.count > 170 { break }
+            picked.append(s)
+            total += s.count
+            if picked.count >= 5 { break }
+        }
+        if picked.isEmpty { return String(text.prefix(120)) }
+        return picked.joined(separator: "。") + "。"
+    }
 
     var joined: String { items.map(\.text).joined(separator: "\n") }
     var charCount: Int { joined.count }
@@ -60,6 +97,7 @@ final class OCRModel: ObservableObject {
 
         DispatchQueue.global(qos: .userInitiated).async {
             var results: [OCRItem] = []
+            var foundCodes: [String] = []
             var errText: String?
             var angle: Double = 0
 
@@ -95,6 +133,14 @@ final class OCRModel: ObservableObject {
                 } catch {
                     errText = "辨識失敗"
                 }
+
+                let barcodeHandler = VNImageRequestHandler(cgImage: cg,
+                                                           orientation: CGImagePropertyOrientation(image.imageOrientation),
+                                                           options: [:])
+                let barcodeRequest = VNDetectBarcodesRequest()
+                if (try? barcodeHandler.perform([barcodeRequest])) != nil {
+                    foundCodes = (barcodeRequest.results ?? []).compactMap { $0.payloadStringValue }
+                }
             } else {
                 errText = "無法讀取這張圖片"
             }
@@ -102,6 +148,8 @@ final class OCRModel: ObservableObject {
             let cost = Date().timeIntervalSince(start)
             DispatchQueue.main.async {
                 self.items = results
+                self.codes = foundCodes
+                self.links = OCRModel.extractLinks(results.map(\.text).joined(separator: "\n"))
                 self.elapsed = cost
                 self.busy = false
                 if let e = errText {
@@ -121,6 +169,8 @@ final class OCRModel: ObservableObject {
         items = []
         preview = nil
         status = "選一張圖，或用相機拍一張"
+        codes = []
+        links = []
         elapsed = 0
     }
 }
@@ -208,6 +258,9 @@ struct OCRView: View {
             } else if !model.items.isEmpty {
                 statsBlock
                 resultBlock
+                if !model.links.isEmpty { linksBlock }
+                if !model.codes.isEmpty { codesBlock }
+                if !model.summary.isEmpty { summaryBlock }
                 actionBlock
             } else {
                 TTPanel(accent: TT.blue) {
@@ -368,6 +421,150 @@ struct OCRView: View {
         }
     }
 
+    private var linksBlock: some View {
+        TTPanel(accent: TT.teal, padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "link")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(TT.teal.opacity(0.8))
+                    Text("偵測到 \(model.links.count) 個網址")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.35))
+                    Spacer()
+                }
+                ForEach(model.links, id: \.self) { link in
+                    HStack(spacing: 8) {
+                        Button {
+                            openString(link)
+                        } label: {
+                            Text(link)
+                                .font(.system(size: 12))
+                                .foregroundStyle(TT.teal)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            copyString(link)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.4))
+                                .frame(width: 28, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var codesBlock: some View {
+        TTPanel(accent: TT.indigo, padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(TT.indigo.opacity(0.85))
+                    Text("圖片中的二維碼")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.35))
+                    Spacer()
+                }
+                ForEach(model.codes, id: \.self) { code in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(code)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.88))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            copyString(code)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.4))
+                                .frame(width: 28, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                if let first = model.codes.first,
+                   first.lowercased().hasPrefix("http") || first.lowercased().hasPrefix("www.") {
+                    Button {
+                        openString(first)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "safari")
+                                .font(.system(size: 11))
+                            Text("在瀏覽器打開")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(TT.indigo)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var summaryBlock: some View {
+        TTPanel(accent: TT.amber, padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(TT.amber.opacity(0.9))
+                    Text("重點摘要 · 本機生成")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.35))
+                    Spacer()
+                    Button {
+                        copyString(model.summary)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(model.summary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func copyString(_ s: String) {
+        UIPasteboard.general.string = s
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func openString(_ raw: String) {
+        var s = raw
+        if s.lowercased().hasPrefix("www.") { s = "https://" + s }
+        guard let url = URL(string: s), let scheme = url.scheme,
+              ["http", "https", "tel", "mailto", "sms"].contains(scheme.lowercased()) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private func openTranslate() {
+        var cs = CharacterSet.alphanumerics
+        cs.insert(charactersIn: "-._~ ")
+        let body = String(model.joined.prefix(1200))
+        guard let enc = body.addingPercentEncoding(withAllowedCharacters: cs),
+              let url = URL(string: "https://translate.google.com/?sl=auto&tl=zh-TW&text=\(enc)") else { return }
+        UIApplication.shared.open(url)
+    }
+
     private func confidenceColor(_ c: Float) -> Color {
         if c > 0.7 { return TT.mint }
         if c > 0.45 { return TT.amber }
@@ -386,6 +583,28 @@ struct OCRView: View {
                     withAnimation { copied = false }
                 }
             }
+            Button(action: openTranslate) {
+                HStack(spacing: 7) {
+                    Image(systemName: "character.bubble")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("翻譯這段文字")
+                        .font(.system(size: 13.5, weight: .semibold))
+                }
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(TT.teal.opacity(0.25), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(model.items.isEmpty)
+            .opacity(model.items.isEmpty ? 0.4 : 1)
             HStack(spacing: 10) {
                 Button {
                     model.clear()
