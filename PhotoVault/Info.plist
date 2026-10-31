@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于把照片和影片同步到你的后台服务器。</string>
+	<string>用于选择头像照片。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于把照片保存到相簿。</string>
 	<key>NSCameraUsageDescription</key>

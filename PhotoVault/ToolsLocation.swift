@@ -228,7 +228,7 @@ struct LocationView: View {
                 Text("需要定位權限")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
-                Text("到「設定 → 相簿備份 → 位置」選擇「使用 App 期間」即可")
+                Text("到「設定 → 隱私權與安全性 → 定位服務」選擇「使用 App 期間」即可")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.42))
                     .multilineTextAlignment(.center)

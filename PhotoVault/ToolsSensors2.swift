@@ -603,7 +603,7 @@ struct DecibelView: View {
                         Text("需要麥克風權限")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
-                        Text("請到「設定 → 相簿備份 → 麥克風」開啟後回來")
+                        Text("請到「設定 → 隱私權與安全性 → 麥克風」開啟後回來")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.4))
                         if let url = URL(string: UIApplication.openSettingsURLString) {

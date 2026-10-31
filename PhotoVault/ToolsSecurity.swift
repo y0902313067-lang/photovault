@@ -791,7 +791,7 @@ struct QRScanView: View {
                     Text(scanner.status)
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.5))
-                    Text("請到「設定 → 相簿備份 → 相機」開啟權限")
+                    Text("請到「設定 → 隱私權與安全性 → 相機」開啟權限")
                         .font(.system(size: 10.5))
                         .foregroundStyle(.white.opacity(0.3))
                 }

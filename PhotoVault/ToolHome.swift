@@ -140,7 +140,6 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
                     header
-                    if store.running { syncBar }
                     featured
                     ForEach(groups) { group in
                         groupSection(group)
@@ -171,40 +170,6 @@ struct HomeView: View {
                 }
             }
         }
-    }
-
-    // MARK: 背景同步條
-
-    private var syncBar: some View {
-        let total = store.totalCount
-        let done = store.uploadedCount
-        let ratio: Double = total > 0 ? Double(done) / Double(total) : max(store.progress, 0.03)
-        return VStack(spacing: 7) {
-            HStack(spacing: 8) {
-                Image(systemName: "icloud.and.arrow.up")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(TT.mint.opacity(0.85))
-                Text(total > 0 ? "背景備份中 \(done)/\(total)" : "背景備份中…")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                Spacer(minLength: 0)
-                Text("不影響使用")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.white.opacity(0.22))
-            }
-            TTMeterBar(ratio: ratio, accent: TT.mint, height: 3)
-        }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.035))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(TT.mint.opacity(0.14), lineWidth: 1)
-        )
-        .transition(.opacity)
     }
 
     // MARK: 標題
