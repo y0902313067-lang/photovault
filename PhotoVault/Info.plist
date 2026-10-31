@@ -34,6 +34,14 @@
 	<string>用于水平仪、指南针、重力与气压海拔等感测工具。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于显示你的即时座标、海拔、速度与定位精度。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>用于「遗失找回」：手机遗失时每小时回传一次位置，让你用另一台手机登入同一账号就能看到。</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>用于「遗失找回」：手机遗失时每小时回传一次位置，让你用另一台手机登入同一账号就能看到。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

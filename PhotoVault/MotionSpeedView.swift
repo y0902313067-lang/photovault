@@ -1,0 +1,696 @@
+import SwiftUI
+import CoreLocation
+import MapKit
+import UIKit
+
+// MARK: - 單位
+
+enum SpeedUnit: String, CaseIterable, Identifiable, Codable {
+    case kmh, mph, ms, knot
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .kmh:  return "公里"
+        case .mph:  return "英里"
+        case .ms:   return "公尺"
+        case .knot: return "節"
+        }
+    }
+
+    var speedShort: String {
+        switch self {
+        case .kmh:  return "km/h"
+        case .mph:  return "mph"
+        case .ms:   return "m/s"
+        case .knot: return "kn"
+        }
+    }
+
+    /// 每秒公尺 → 這個單位
+    func value(fromMPS mps: Double) -> Double {
+        switch self {
+        case .kmh:  return mps * 3.6
+        case .mph:  return mps * 2.2369362920544
+        case .ms:   return mps
+        case .knot: return mps * 1.9438444924406
+        }
+    }
+
+    /// 公尺 → 這個單位的距離
+    func distance(fromMeters m: Double) -> Double {
+        switch self {
+        case .kmh:  return m / 1000
+        case .ms:   return m
+        case .mph:  return m / 1609.344
+        case .knot: return m / 1852
+        }
+    }
+
+    var distanceShort: String {
+        switch self {
+        case .kmh:  return "km"
+        case .ms:   return "m"
+        case .mph:  return "mi"
+        case .knot: return "nmi"
+        }
+    }
+}
+
+// MARK: - 一次紀錄
+
+struct SpeedRun: Codable, Identifiable {
+    var id = UUID()
+    var date: Date
+    var duration: Double        // 秒
+    var distance: Double        // 公尺
+    var maxSpeed: Double        // m/s
+    var avgSpeed: Double        // m/s
+    var ascent: Double          // 公尺
+    var descent: Double         // 公尺
+    var unitRaw: String
+
+    var unit: SpeedUnit { SpeedUnit(rawValue: unitRaw) ?? .kmh }
+}
+
+// MARK: - 模型
+
+final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var running = false
+    @Published var paused = false
+    @Published var elapsed: Double = 0
+    @Published var distance: Double = 0
+    @Published var current: Double = 0          // m/s
+    @Published var maxSpeed: Double = 0         // m/s
+    @Published var altitude: Double = 0
+    @Published var ascent: Double = 0
+    @Published var descent: Double = 0
+    @Published var accuracy: Double = -1
+    @Published var route: [CLLocationCoordinate2D] = []
+    @Published var denied = false
+    @Published var gpsReady = false
+    @Published var history: [SpeedRun] = []
+    @Published var unit: SpeedUnit = .kmh {
+        didSet { UserDefaults.standard.set(unit.rawValue, forKey: "pv_speed_unit") }
+    }
+
+    private let lm = CLLocationManager()
+    private var timer: Timer?
+    private var segStart: Date?
+    private var accumulated: Double = 0
+    private var lastPoint: CLLocation?
+    private var lastAlt: Double?
+    private var hasFix = false
+
+    override init() {
+        super.init()
+        lm.delegate = self
+        lm.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        lm.distanceFilter = 1.5
+        lm.activityType = .fitness
+        if let raw = UserDefaults.standard.string(forKey: "pv_speed_unit"),
+           let u = SpeedUnit(rawValue: raw) {
+            unit = u
+        }
+        history = Self.loadHistory()
+    }
+
+    // MARK: 權限 / 生命週期
+
+    func startUpdates() {
+        switch lm.authorizationStatus {
+        case .notDetermined:
+            lm.requestWhenInUseAuthorization()
+        case .denied, .restricted:
+            denied = true
+        default:
+            denied = false
+            lm.startUpdatingLocation()
+        }
+    }
+
+    func stopUpdates() {
+        lm.stopUpdatingLocation()
+        stopTimer()
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            denied = false
+            manager.startUpdatingLocation()
+        case .denied, .restricted:
+            denied = true
+        default:
+            break
+        }
+    }
+
+    // MARK: 計時
+
+    private func startTimer() {
+        stopTimer()
+        let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self, !self.paused else { return }
+            self.elapsed = self.rawElapsed
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private var rawElapsed: Double {
+        accumulated + (segStart.map { Date().timeIntervalSince($0) } ?? 0)
+    }
+
+    // MARK: 控制
+
+    func start() {
+        guard !running else { return }
+        reset(false)
+        running = true
+        paused = false
+        segStart = Date()
+        startTimer()
+        startUpdates()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    func pause() {
+        guard running, !paused else { return }
+        paused = true
+        accumulated = rawElapsed
+        segStart = nil
+        elapsed = accumulated
+        current = 0
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    func resume() {
+        guard running, paused else { return }
+        paused = false
+        segStart = Date()
+        startTimer()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    func stop() {
+        guard running else { return }
+        accumulated = rawElapsed
+        segStart = nil
+        elapsed = accumulated
+        running = false
+        paused = false
+        current = 0
+        stopTimer()
+        if elapsed >= 3, distance >= 10 {
+            let run = SpeedRun(date: Date(),
+                               duration: elapsed,
+                               distance: distance,
+                               maxSpeed: maxSpeed,
+                               avgSpeed: distance / max(elapsed, 0.001),
+                               ascent: ascent,
+                               descent: descent,
+                               unitRaw: unit.rawValue)
+            history.insert(run, at: 0)
+            history = Array(history.prefix(30))
+            Self.saveHistory(history)
+        }
+    }
+
+    func reset(_ manual: Bool = true) {
+        accumulated = 0
+        segStart = nil
+        elapsed = 0
+        distance = 0
+        current = 0
+        maxSpeed = 0
+        ascent = 0
+        descent = 0
+        route = []
+        lastPoint = nil
+        lastAlt = nil
+        if manual {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    func clearHistory() {
+        history = []
+        Self.saveHistory(history)
+    }
+
+    // MARK: 定位回呼
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last else { return }
+        hasFix = true
+        gpsReady = true
+        accuracy = loc.horizontalAccuracy
+        if loc.verticalAccuracy > 0 { altitude = loc.altitude }
+
+        // 瞬時速度：GPS 給負值代表靜止
+        let s = loc.speed >= 0 ? loc.speed : 0
+        if !paused {
+            // 顯示值做一點平滑，避免數字亂跳
+            current = current * 0.35 + s * 0.65
+            if s > maxSpeed { maxSpeed = s }
+        } else {
+            current = 0
+        }
+
+        guard running, !paused, loc.horizontalAccuracy > 0, loc.horizontalAccuracy < 55 else {
+            if lastPoint == nil { lastPoint = loc }
+            return
+        }
+
+        if let prev = lastPoint {
+            let step = loc.distance(from: prev)
+            let dt = loc.timestamp.timeIntervalSince(prev.timestamp)
+            // 過濾 GPS 漂移：一次跳太遠或時間沒前進都不算
+            if step >= 1.2, step <= max(120, s * max(dt, 1) * 3), dt > 0, dt < 60 {
+                distance += step
+                route.append(loc.coordinate)
+            }
+        } else {
+            route.append(loc.coordinate)
+        }
+        lastPoint = loc
+
+        // 海拔累計
+        if loc.verticalAccuracy > 0, loc.verticalAccuracy < 30 {
+            if let prevAlt = lastAlt {
+                let diff = loc.altitude - prevAlt
+                if abs(diff) >= 1.2 {
+                    if diff > 0 { ascent += diff } else { descent -= diff }
+                    lastAlt = loc.altitude
+                }
+            } else {
+                lastAlt = loc.altitude
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        if !hasFix { gpsReady = false }
+    }
+
+    // MARK: 顯示輔助
+
+    var currentText: String { String(format: "%.1f", unit.value(fromMPS: current)) }
+    var maxText: String { String(format: "%.1f", unit.value(fromMPS: maxSpeed)) }
+    var avgSpeed: Double { elapsed > 0.5 ? distance / elapsed : 0 }
+    var avgText: String { String(format: "%.1f", unit.value(fromMPS: avgSpeed)) }
+    var distanceText: String {
+        let d = unit.distance(fromMeters: distance)
+        return d >= 100 ? String(format: "%.1f", d) : String(format: "%.2f", d)
+    }
+
+    var elapsedText: String {
+        let total = Int(elapsed.rounded())
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    /// 配速：每公里幾分鐘（距離太短不顯示）
+    var paceText: String {
+        guard distance > 20, elapsed > 1 else { return "—" }
+        let secPerKm = elapsed / (distance / 1000)
+        let m = Int(secPerKm) / 60
+        let s = Int(secPerKm) % 60
+        return String(format: "%d'%02d\"", m, s)
+    }
+
+    var altitudeText: String { String(format: "%.0f", altitude) }
+    var ascentText: String { String(format: "%.0f", ascent) }
+    var descentText: String { String(format: "%.0f", descent) }
+
+    // MARK: 歷史
+
+    private static func loadHistory() -> [SpeedRun] {
+        guard let data = UserDefaults.standard.data(forKey: "pv_speed_history"),
+              let list = try? JSONDecoder().decode([SpeedRun].self, from: data) else { return [] }
+        return list
+    }
+
+    private static func saveHistory(_ list: [SpeedRun]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: "pv_speed_history")
+        }
+    }
+}
+
+// MARK: - 軌跡地圖
+
+struct RouteMapView: UIViewRepresentable {
+    var coords: [CLLocationCoordinate2D]
+    var accent: UIColor
+
+    func makeUIView(context: Context) -> MKMapView {
+        let map = MKMapView()
+        map.delegate = context.coordinator
+        map.showsUserLocation = true
+        map.isRotateEnabled = false
+        map.pointOfInterestFilter = .excludingAll
+        map.overrideUserInterfaceStyle = .dark
+        return map
+    }
+
+    func updateUIView(_ map: MKMapView, context: Context) {
+        let shown = context.coordinator.drawn
+        guard coords.count != shown else { return }
+        context.coordinator.drawn = coords.count
+
+        let old = map.overlays
+        if !old.isEmpty { map.removeOverlays(old) }
+
+        guard coords.count >= 2 else {
+            if let one = coords.first {
+                map.setRegion(MKCoordinateRegion(center: one,
+                                                 latitudinalMeters: 420,
+                                                 longitudinalMeters: 420), animated: true)
+            }
+            return
+        }
+
+        let poly = MKPolyline(coordinates: coords, count: coords.count)
+        map.addOverlay(poly)
+
+        if coords.count % 12 == 2 || shown == 0 {
+            map.setVisibleMapRect(poly.boundingMapRect,
+                                  edgePadding: UIEdgeInsets(top: 34, left: 34, bottom: 34, right: 34),
+                                  animated: true)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(accent: accent) }
+
+    final class Coordinator: NSObject, MKMapViewDelegate {
+        var drawn = -1
+        let accent: UIColor
+
+        init(accent: UIColor) { self.accent = accent }
+
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            guard let line = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
+            let r = MKPolylineRenderer(polyline: line)
+            r.strokeColor = accent
+            r.lineWidth = 4
+            r.lineCap = .round
+            r.lineJoin = .round
+            return r
+        }
+    }
+}
+
+// MARK: - 畫面
+
+struct MotionSpeedView: View {
+    @StateObject private var model = MotionSpeedModel()
+
+    var body: some View {
+        TTScreen(title: "薄荷測速",
+                 subtitle: "MINT SPEED TRACKER",
+                 badge: model.running ? (model.paused ? "已暫停" : "記錄中") : "待機",
+                 badgeOn: model.running && !model.paused,
+                 accent: TT.amber) {
+            if model.denied {
+                permissionPanel
+            } else {
+                gaugeBlock
+                unitBlock
+                statsBlock
+                mapBlock
+                controlBlock
+                historyBlock
+            }
+        }
+        .onAppear { model.startUpdates() }
+        .onDisappear { model.stopUpdates() }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: 主錶
+
+    private var gaugeBlock: some View {
+        TTPanel(accent: TT.amber) {
+            VStack(spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(model.currentText)
+                        .font(.system(size: 64, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            LinearGradient(colors: [.white, TT.amber.opacity(0.92)],
+                                           startPoint: .top, endPoint: .bottom)
+                        )
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    Text(model.unit.speedShort)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(TT.amber.opacity(0.8))
+                        .padding(.bottom, 8)
+                }
+                .frame(maxWidth: .infinity)
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(model.gpsReady ? TT.mint : TT.rose)
+                        .frame(width: 5, height: 5)
+                    Text(model.gpsReady
+                         ? String(format: "GPS 已定位 · 誤差 %.0f m", max(model.accuracy, 0))
+                         : "正在取得 GPS 訊號…")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.white.opacity(0.42))
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    // MARK: 單位
+
+    private var unitBlock: some View {
+        VStack(spacing: 9) {
+            TTSectionTitle(text: "速度單位", accent: TT.amber)
+            HStack(spacing: 8) {
+                ForEach(SpeedUnit.allCases) { u in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { model.unit = u }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Text(u.title)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(model.unit == u ? TT.ink : .white.opacity(0.6))
+                            Text(u.speedShort)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(model.unit == u ? TT.ink.opacity(0.65) : .white.opacity(0.28))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .fill(model.unit == u ? TT.amber.opacity(0.92) : Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .strokeBorder(model.unit == u ? Color.clear : TT.amber.opacity(0.16),
+                                              lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: 數據
+
+    private var statsBlock: some View {
+        VStack(spacing: 10) {
+            TTSectionTitle(text: "本次紀錄", accent: TT.amber)
+            HStack(spacing: 10) {
+                TTStat(title: "用時", value: model.elapsedText, accent: TT.teal)
+                TTStat(title: "移動距離", value: model.distanceText,
+                       unit: model.unit.distanceShort, accent: TT.mint)
+            }
+            HStack(spacing: 10) {
+                TTStat(title: "最高時速", value: model.maxText,
+                       unit: model.unit.speedShort, accent: TT.rose)
+                TTStat(title: "平均速度", value: model.avgText,
+                       unit: model.unit.speedShort, accent: TT.blue)
+            }
+            HStack(spacing: 10) {
+                TTStat(title: "配速 / 公里", value: model.paceText, accent: TT.violet)
+                TTStat(title: "目前海拔", value: model.altitudeText, unit: "m", accent: TT.indigo)
+            }
+            HStack(spacing: 10) {
+                TTStat(title: "累計上升", value: model.ascentText, unit: "m", accent: TT.lime)
+                TTStat(title: "累計下降", value: model.descentText, unit: "m", accent: TT.amber)
+            }
+        }
+    }
+
+    // MARK: 地圖
+
+    private var mapBlock: some View {
+        VStack(spacing: 9) {
+            TTSectionTitle(text: "移動軌跡", accent: TT.mint)
+            RouteMapView(coords: model.route, accent: UIColor(red: 0.62, green: 0.98, blue: 0.52, alpha: 1))
+                .frame(height: 210)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(TT.mint.opacity(0.18), lineWidth: 1)
+                )
+                .overlay(alignment: .bottomLeading) {
+                    if model.route.count < 2 {
+                        Text("開始移動後會畫出路線")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.black.opacity(0.5)))
+                            .padding(10)
+                    }
+                }
+        }
+    }
+
+    // MARK: 控制
+
+    private var controlBlock: some View {
+        HStack(spacing: 10) {
+            if !model.running {
+                TTButton(title: "開始測速", icon: "play.fill", accent: TT.amber) {
+                    model.start()
+                }
+            } else if model.paused {
+                TTButton(title: "繼續", icon: "play.fill", accent: TT.mint) {
+                    model.resume()
+                }
+                TTButton(title: "結束", icon: "stop.fill", accent: TT.rose) {
+                    model.stop()
+                }
+            } else {
+                TTButton(title: "暫停", icon: "pause.fill", accent: TT.teal) {
+                    model.pause()
+                }
+                TTButton(title: "結束", icon: "stop.fill", accent: TT.rose) {
+                    model.stop()
+                }
+            }
+        }
+    }
+
+    // MARK: 歷史
+
+    private var historyBlock: some View {
+        VStack(spacing: 10) {
+            HStack {
+                TTSectionTitle(text: "歷史紀錄", accent: TT.violet)
+                Spacer(minLength: 8)
+                if !model.history.isEmpty {
+                    Button {
+                        withAnimation { model.clearHistory() }
+                    } label: {
+                        Text("清空")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if model.history.isEmpty {
+                TTPanel(accent: TT.violet) {
+                    TTEmptyHint(icon: "speedometer", text: "還沒有紀錄\n測速結束後會自動存到本機")
+                }
+            } else {
+                ForEach(model.history) { run in
+                    historyRow(run)
+                }
+            }
+        }
+    }
+
+    private func historyRow(_ run: SpeedRun) -> some View {
+        let u = run.unit
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Self.dateText(run.date))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                Text("\(Self.mmss(run.duration)) · \(String(format: "%.2f", u.distance(fromMeters: run.distance))) \(u.distanceShort)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            Spacer(minLength: 6)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("\(String(format: "%.1f", u.value(fromMPS: run.maxSpeed))) \(u.speedShort)")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TT.amber.opacity(0.9))
+                Text("平均 \(String(format: "%.1f", u.value(fromMPS: run.avgSpeed)))")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .strokeBorder(TT.violet.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    // MARK: 權限
+
+    private var permissionPanel: some View {
+        TTPanel(accent: TT.rose) {
+            VStack(spacing: 10) {
+                Image(systemName: "location.slash")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(TT.rose.opacity(0.7))
+                Text("需要定位權限")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("測速靠 GPS 計算速度與距離，到「設定 → 薄荷龍科技 → 位置」選「使用 App 期間」即可")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .multilineTextAlignment(.center)
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    Link("前往設定", destination: url)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(TT.mint)
+                        .padding(.top, 2)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: 格式化
+
+    static func dateText(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM/dd HH:mm"
+        return f.string(from: d)
+    }
+
+    static func mmss(_ t: Double) -> String {
+        let total = Int(t.rounded())
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: "%d:%02d", m, s)
+    }
+}

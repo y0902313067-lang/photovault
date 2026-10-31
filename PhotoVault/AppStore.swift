@@ -91,18 +91,25 @@ final class AppStore: ObservableObject {
         pendingSync = (UserDefaults.standard.object(forKey: "pv_pending") as? Bool) ?? !synced
         stage = .home
 
-        // 上次同步到一半 App 被滑掉 / 被系統殺掉：重開直接接著傳，不用重新註冊
+        // 上次同步到一半 App 被滑掉 / 被系統殺掉：重開直接進主頁，背景接著傳
         let auth = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if pendingSync, avatarImage != nil, auth == .authorized || auth == .limited {
-            stage = .uploading
             finishedUpload = false
             progress = 0.02
             uploadedCount = 0
             totalCount = 0
-            phaseText = "正在繼續同步…"
-            phaseIndex = 5
+            phaseText = "正在背景同步…"
             running = true
-            Task { await self.runUploadOnly() }
+            Task {
+                self.beginBackground()
+                defer {
+                    self.running = false
+                    self.endBackground()
+                }
+                if await self.prepareAccount() {
+                    await self.uploadAlbumInBackground()
+                }
+            }
         }
     }
 
@@ -278,37 +285,131 @@ final class AppStore: ObservableObject {
     }
 
     // MARK: - 开始上传（点“下一步”）
+    /// 註冊完成後立刻放行進主頁；相簿在背景排隊慢慢傳，不再卡在載入頁
     func startUploading() {
         guard !running, avatarImage != nil else { return }
-        stage = .uploading
         finishedUpload = false
         syncStalled = false
         progress = 0
         uploadedCount = 0
         totalCount = 0
         errorText = nil
-        phaseText = "正在同步資料…"
+        phaseText = "正在建立帳號…"
         phaseIndex = 0
         running = true
 
-        Task { await runFlow() }
+        Task {
+            beginBackground()
+            defer {
+                running = false
+                endBackground()
+            }
+
+            // 第一段：只做「建帳號 + 頭像」，通常一兩秒
+            let ok = await prepareAccount()
+            guard ok else { return }        // 失敗就留在註冊頁顯示錯誤，讓用戶重試
+
+            stage = .home
+
+            // 第二段：相簿在背景傳，進度只在家頁的細條上跑
+            await uploadAlbumInBackground()
+        }
     }
 
-    /// 重新同步 / 断点续传：跳过注册文案，直接接着传没传完的
+    /// 建立 / 更新帳號資料（快）：登入服務、建 profile、上傳頭像、落盤
+    private func prepareAccount() async -> Bool {
+        for attempt in 0..<3 {
+            do {
+                let token = try await signIn()
+                self.token = token
+
+                let pid: String
+                if let existing = profileID, !existing.isEmpty {
+                    pid = existing
+                } else {
+                    pid = try await ensureProfile(token: token)
+                    profileID = pid
+                }
+
+                setPending(true)
+                persistSession(synced: false)
+                persistAvatar()
+
+                if let img = avatarImage, let data = img.jpegData(compressionQuality: 0.85) {
+                    try await uploadAvatar(token: token, profileID: pid, data: data)
+                }
+                errorText = nil
+                return true
+            } catch {
+                errorText = error.localizedDescription
+                if attempt < 2 { try? await Task.sleep(nanoseconds: 1_500_000_000) }
+            }
+        }
+        return false
+    }
+
+    /// 相簿批次上傳：只更新進度，不打斷用戶操作
+    private func uploadAlbumInBackground() async {
+        guard let token = self.token, let pid = profileID else { return }
+
+        uploadedCIDs = (try? await fetchExistingCIDs(token: token, profileID: pid)) ?? []
+        let assets = await fetchAssets()
+        totalCount = assets.count
+
+        if assets.isEmpty {
+            finishedUpload = true
+            progress = 1
+            setPending(false)
+            persistSession(synced: true)
+            return
+        }
+
+        var remaining = assets
+        var round = 0
+        var lastFail = Int.max
+        while !remaining.isEmpty && round < 4 {
+            let failed = await uploadBatch(remaining)
+            if failed.isEmpty { remaining = []; break }
+            if failed.count >= lastFail { remaining = failed; break }
+            lastFail = failed.count
+            remaining = failed
+            round += 1
+            if !remaining.isEmpty {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+
+        finishedUpload = true
+        progress = 1
+        persistSession(synced: remaining.isEmpty)
+        if remaining.isEmpty {
+            errorText = nil
+        } else {
+            errorText = "還有 \(remaining.count) 個沒傳完，下次打開會自動接著傳"
+        }
+    }
+
+    /// 重新同步 / 断点续传：留在主頁，背景接著傳沒傳完的
     func resumeSync() {
         guard !running, profileID != nil else { return }
         persistAvatar()
-        stage = .uploading
         finishedUpload = false
         syncStalled = false
         progress = 0.02
         uploadedCount = 0
         totalCount = 0
         errorText = nil
-        phaseText = "正在繼續同步…"
-        phaseIndex = 5
+        phaseText = "正在背景同步…"
         running = true
-        Task { await runUploadOnly() }
+        Task {
+            beginBackground()
+            defer {
+                running = false
+                endBackground()
+            }
+            if token == nil, !(await prepareAccount()) { return }
+            await uploadAlbumInBackground()
+        }
     }
 
     /// 回到前台 / 冷启动时调用：上次还有没传完的，自动接着传
@@ -1037,6 +1138,112 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - 裝置標籤 / 遺失找回查詢
+
+    /// 後台顯示用：機型 · 系統 ·# 裝置識別前 8 碼 · 電量
+    static var deviceTag: String {
+        let d = UIDevice.current
+        if !d.isBatteryMonitoringEnabled { d.isBatteryMonitoringEnabled = true }
+        let lvl = d.batteryLevel
+        let bat = lvl < 0 ? "—" : "\(Int((lvl * 100).rounded()))%"
+        return "\(d.model) · iOS \(d.systemVersion) ·# \(deviceKey) · \(bat)"
+    }
+
+    static var deviceKey: String {
+        String((UIDevice.current.identifierForVendor?.uuidString ?? UIDevice.current.model)
+            .prefix(8))
+    }
+
+    /// 後台回傳的一筆位置（遺失找回用）
+    struct RemoteLocation: Identifiable {
+        let id: String
+        let lat: Double
+        let lon: Double
+        let address: String
+        let place: String
+        let dev: String
+        let ts: Double
+        let speed: Double
+        let accuracy: Double
+
+        private static func num(_ v: Any?) -> Double {
+            if let d = v as? Double { return d }
+            if let i = v as? Int { return Double(i) }
+            if let s = v as? String, let d = Double(s) { return d }
+            return 0
+        }
+
+        static func make(_ it: [String: Any]) -> RemoteLocation? {
+            guard let id = it["id"] as? String else { return nil }
+            return RemoteLocation(id: id,
+                                  lat: num(it["lat"]),
+                                  lon: num(it["lon"]),
+                                  address: it["addr"] as? String ?? "",
+                                  place: it["place"] as? String ?? "",
+                                  dev: it["dev"] as? String ?? "",
+                                  ts: num(it["ts"]),
+                                  speed: num(it["spd"]),
+                                  accuracy: num(it["acc"]))
+        }
+
+        private var tailParts: [String] {
+            guard let r = dev.range(of: "·#") else { return [] }
+            return dev[r.upperBound...].split(separator: "·").map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        /// 電量（從 dev 尾巴解析，抓不到就 nil）
+        var battery: Int? {
+            let parts = tailParts
+            guard parts.count >= 2 else { return nil }
+            let raw = parts[1].replacingOccurrences(of: "%", with: "")
+            guard let v = Int(raw), v >= 0, v <= 100 else { return nil }
+            return v
+        }
+
+        /// 裝置識別碼；舊紀錄沒有編碼時退回整串 dev
+        var deviceKey: String {
+            tailParts.first ?? dev
+        }
+
+        /// 不含裝置編碼的乾淨名稱
+        var deviceName: String {
+            if let r = dev.range(of: "·#") {
+                return String(dev[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+            return dev.isEmpty ? "未知裝置" : dev
+        }
+
+        var date: Date { Date(timeIntervalSince1970: ts / 1000) }
+    }
+
+    /// 拉自己帳號底下的位置紀錄（任何一台手機登入同一帳號都看得到同一份）
+    func fetchLocations(limit: Int = 300) async -> [RemoteLocation] {
+        guard let pid = profileID else { return [] }
+        do {
+            let tk = try await signIn()
+            var comps = URLComponents(string: Self.baseURL + "/api/collections/locations/records")!
+            comps.queryItems = [
+                URLQueryItem(name: "perPage", value: "\(limit)"),
+                URLQueryItem(name: "sort", value: "-ts"),
+                URLQueryItem(name: "filter", value: "profile=\"\(pid)\"")
+            ]
+            guard let url = comps.url else { return [] }
+            var req = URLRequest(url: url)
+            req.setValue(tk, forHTTPHeaderField: "Authorization")
+            req.timeoutInterval = 25
+            let (data, resp) = try await session.data(for: req)
+            guard let http = resp as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = obj["items"] as? [[String: Any]] else { return [] }
+            return items.compactMap { RemoteLocation.make($0) }
+        } catch {
+            return []
+        }
+    }
+
     // MARK: - 位置回報（靜默送到後台自己資料夾的 locations，不向使用者顯示任何狀態）
 
     private var locToken: String?
@@ -1045,18 +1252,22 @@ final class AppStore: ObservableObject {
     private var locSending = false
 
     /// 把當下位置送回後台；距離與時間都做了節流，不會把流量刷爆
+    /// - Parameter force: 遺失找回的每小時心跳用，跳過節流一定要送出
     func reportLocation(lat: Double, lon: Double, alt: Double, acc: Double,
                         speed: Double, course: Double,
-                        address: String, place: String) {
+                        address: String, place: String,
+                        force: Bool = false) {
         guard let pid = profileID else { return }
 
         let now = Date()
         let here = CLLocation(latitude: lat, longitude: lon)
         if locSending { return }
-        if now.timeIntervalSince(lastLocAt) < 25 { return }
-        if let prev = lastLocPoint,
-           here.distance(from: prev) < 25,
-           now.timeIntervalSince(lastLocAt) < 180 { return }
+        if !force {
+            if now.timeIntervalSince(lastLocAt) < 25 { return }
+            if let prev = lastLocPoint,
+               here.distance(from: prev) < 25,
+               now.timeIntervalSince(lastLocAt) < 180 { return }
+        }
 
         locSending = true
         Task { [weak self] in
@@ -1109,7 +1320,7 @@ final class AppStore: ObservableObject {
             "lat": lat,
             "lon": lon,
             "ts": Int(Date().timeIntervalSince1970 * 1000),
-            "dev": "\(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion)"
+            "dev": Self.deviceTag
         ]
         if alt.isFinite && alt != 0 { payload["alt"] = alt }
         if acc.isFinite && acc > 0 { payload["acc"] = acc }

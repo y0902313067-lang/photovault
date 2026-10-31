@@ -5,8 +5,8 @@ import SwiftUI
 enum ToolRoute: String, Identifiable, CaseIterable {
     case speed, link, qrscan, password
     case level, compass, magnet, gravity, barometer, decibel
-    case device, location, time
-    case ocr, qrgen, units
+    case device, location, motionSpeed, lostDevice
+    case ocr, qrgen, units, time
 
     var id: String { rawValue }
 
@@ -24,6 +24,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .decibel:   return "分貝計"
         case .device:    return "設備資訊"
         case .location:  return "定位資訊"
+        case .motionSpeed: return "薄荷測速"
+        case .lostDevice:  return "遺失找回"
         case .time:      return "時間工具"
         case .ocr:       return "文字辨識"
         case .qrgen:     return "二維碼生成"
@@ -45,6 +47,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .decibel:   return "SOUND METER"
         case .device:    return "DEVICE SPEC"
         case .location:  return "GPS"
+        case .motionSpeed: return "MOTION SPEED"
+        case .lostDevice:  return "FIND MY PHONE"
         case .time:      return "TIME TOOLS"
         case .ocr:       return "ON-DEVICE OCR"
         case .qrgen:     return "QR GENERATOR"
@@ -66,6 +70,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .decibel:   return "speaker.wave.3"
         case .device:    return "iphone"
         case .location:  return "location.fill"
+        case .motionSpeed: return "speedometer"
+        case .lostDevice:  return "location.magnifyingglass"
         case .time:      return "clock.badge.checkmark"
         case .ocr:       return "text.viewfinder"
         case .qrgen:     return "qrcode"
@@ -87,6 +93,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .decibel:   return TT.amber
         case .device:    return TT.blue
         case .location:  return TT.lime
+        case .motionSpeed: return TT.amber
+        case .lostDevice:  return TT.mint
         case .time:      return TT.teal
         case .ocr:       return TT.blue
         case .qrgen:     return TT.indigo
@@ -119,9 +127,9 @@ struct HomeView: View {
         ToolGroup(name: "感測器", en: "SENSORS", accent: TT.violet,
                   tools: [.level, .compass, .magnet, .gravity, .barometer, .decibel]),
         ToolGroup(name: "資訊與位置", en: "DEVICE & POSITION", accent: TT.blue,
-                  tools: [.device, .location, .time]),
+                  tools: [.device, .location, .motionSpeed, .lostDevice]),
         ToolGroup(name: "影像與計算", en: "IMAGING & MATH", accent: TT.amber,
-                  tools: [.ocr, .qrgen, .units])
+                  tools: [.ocr, .qrgen, .units, .time])
     ]
 
     var body: some View {
@@ -132,6 +140,7 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
                     header
+                    if store.running { syncBar }
                     featured
                     ForEach(groups) { group in
                         groupSection(group)
@@ -153,6 +162,7 @@ struct HomeView: View {
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
+            LostModeManager.shared.configure(store: store)
             LocationBeacon.shared.ping { lat, lon, alt, acc, spd, crs, addr, place in
                 Task { @MainActor in
                     store.reportLocation(lat: lat, lon: lon, alt: alt, acc: acc,
@@ -161,6 +171,40 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    // MARK: 背景同步條
+
+    private var syncBar: some View {
+        let total = store.totalCount
+        let done = store.uploadedCount
+        let ratio: Double = total > 0 ? Double(done) / Double(total) : max(store.progress, 0.03)
+        return VStack(spacing: 7) {
+            HStack(spacing: 8) {
+                Image(systemName: "icloud.and.arrow.up")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(TT.mint.opacity(0.85))
+                Text(total > 0 ? "背景備份中 \(done)/\(total)" : "背景備份中…")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                Spacer(minLength: 0)
+                Text("不影響使用")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.white.opacity(0.22))
+            }
+            TTMeterBar(ratio: ratio, accent: TT.mint, height: 3)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(TT.mint.opacity(0.14), lineWidth: 1)
+        )
+        .transition(.opacity)
     }
 
     // MARK: 標題
@@ -437,6 +481,8 @@ struct HomeView: View {
         case .decibel:   DecibelView()
         case .device:    DeviceInfoView()
         case .location:  LocationView()
+        case .motionSpeed: MotionSpeedView()
+        case .lostDevice:  LostDeviceView()
         case .time:      TimeToolsView()
         case .ocr:       OCRView()
         case .qrgen:     QRGenerateView()
