@@ -105,6 +105,7 @@ struct TechGrid: View {
 /// 薄荷龍標誌（發光卡片 + 旋轉軌道 + 掃光）
 struct MintDragonMark: View {
     var size: CGFloat = 86
+    var asset: String = "MintDragon"
     @State private var spin = false
     @State private var sweep = false
 
@@ -129,7 +130,7 @@ struct MintDragonMark: View {
                     .fill(LinearGradient(colors: [Color(red: 0.05, green: 0.15, blue: 0.19),
                                                   Brand.ink],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
-                Image("MintDragon")
+                Image(asset)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: box * 0.74, height: box * 0.74)
@@ -170,7 +171,7 @@ private struct TechHeader: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MintDragonMark(size: 118)
+            MintDragonMark(size: 118, asset: "MintDragonBrand")
                 .padding(.top, 30)
 
             Text(isLogin ? "登入帳號" : "建立帳號")
@@ -559,7 +560,7 @@ struct UploadingView: View {
     // 左上角品牌：薄荷龍 logo + 名稱
     private var brandHeader: some View {
         HStack(spacing: 10) {
-            Image("MintDragon")
+            Image("MintDragonBrand")
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: 40, height: 40)
