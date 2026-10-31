@@ -56,6 +56,10 @@ final class AppStore: ObservableObject {
     @Published var busy = false
     /// 正在建立帳號（只有註冊那一兩秒會是 true）
     @Published var running = false
+    /// 個人檔案頁正在上傳新頭像
+    @Published var avatarUploading = false
+    /// 個人檔案頁換頭像後的小提示（nil = 不顯示）
+    @Published var avatarToast: String?
 
     private var token: String?
 
@@ -189,6 +193,48 @@ final class AppStore: ObservableObject {
 
     func setAvatar(_ image: UIImage) {
         avatarImage = normalizeAvatar(image)
+    }
+
+    // MARK: - 更換頭像（個人檔案頁頭像右下角的 +）
+    /// 先換本機（下一秒就看到），再背景同步到後台；後台不通也不影響本機顯示
+    func changeAvatar(_ image: UIImage) {
+        setAvatar(image)
+        persistAvatar()
+
+        guard let pid = profileID, !pid.isEmpty else {
+            toast("頭像已更新")
+            return
+        }
+
+        avatarUploading = true
+        Task {
+            var ok = false
+            do {
+                let t: String
+                if let existing = token, !existing.isEmpty {
+                    t = existing
+                } else {
+                    let fresh = try await signIn()
+                    self.token = fresh
+                    t = fresh
+                }
+                if let data = avatarImage?.jpegData(compressionQuality: 0.85) {
+                    ok = try await uploadAvatar(token: t, profileID: pid, data: data)
+                }
+            } catch {
+                ok = false
+            }
+            avatarUploading = false
+            toast(ok ? "頭像已更新" : "頭像已存在本機，稍後自動同步")
+        }
+    }
+
+    private func toast(_ text: String) {
+        avatarToast = text
+        Task {
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            if avatarToast == text { avatarToast = nil }
+        }
     }
 
     private func normalizeAvatar(_ image: UIImage) -> UIImage {
@@ -387,7 +433,8 @@ final class AppStore: ObservableObject {
         avatarImage = img
     }
 
-    private func uploadAvatar(token: String, profileID: String, data: Data) async throws {
+    @discardableResult
+    private func uploadAvatar(token: String, profileID: String, data: Data) async throws -> Bool {
         guard let url = URL(string: Self.baseURL + "/api/collections/profiles/records/\(profileID)") else {
             throw PVError.msg("地址无效")
         }
@@ -405,7 +452,9 @@ final class AppStore: ObservableObject {
         req.setValue(token, forHTTPHeaderField: "Authorization")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
-        _ = try? await session.data(for: req)
+        let (_, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
     }
 
     // MARK: - 裝置標籤 / 遺失找回查詢

@@ -555,6 +555,8 @@ struct ProfileView: View {
     @State private var showLogout = false
     @State private var cameraGranted = false
     @State private var micGranted = false
+    @State private var showAvatarPicker = false
+    @State private var pickedAvatar: PhotosPickerItem?
     @Environment(\.scenePhase) private var profileScene
 
     var body: some View {
@@ -573,6 +575,33 @@ struct ProfileView: View {
                         }
                     }
                     .frame(width: 132, height: 132)
+                    .overlay(alignment: .bottomTrailing) {
+                        Button {
+                            showAvatarPicker = true
+                        } label: {
+                            ZStack {
+                                Circle().fill(Brand.mint)
+                                if store.avatarUploading {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                        .tint(Color(red: 0.02, green: 0.10, blue: 0.09))
+                                        .scaleEffect(0.7)
+                                } else {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 16, weight: .heavy))
+                                        .foregroundStyle(Color(red: 0.02, green: 0.10, blue: 0.09))
+                                }
+                            }
+                            .frame(width: 38, height: 38)
+                            .overlay(
+                                Circle().strokeBorder(Color(red: 0.05, green: 0.07, blue: 0.13), lineWidth: 3)
+                            )
+                            .shadow(color: Brand.mint.opacity(0.45), radius: 9)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 2, y: 2)
+                        .accessibilityLabel("更換頭像")
+                    }
                     .padding(.top, 12)
 
                     VStack(spacing: 4) {
@@ -583,6 +612,13 @@ struct ProfileView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(.white.opacity(0.45))
                     }
+
+                    Text(store.avatarToast ?? " ")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Brand.mint.opacity(0.9))
+                        .frame(height: 14)
+                        .opacity(store.avatarToast == nil ? 0 : 1)
+                        .animation(.easeInOut(duration: 0.2), value: store.avatarToast)
 
                     VStack(spacing: 0) {
                         row("帳號狀態", "已啟用")
@@ -678,6 +714,17 @@ struct ProfileView: View {
             }
         }
         .presentationDetents([.large])
+        .photosPicker(isPresented: $showAvatarPicker, selection: $pickedAvatar, matching: .images)
+        .onChange(of: pickedAvatar) { item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    await MainActor.run { store.changeAvatar(img) }
+                }
+                await MainActor.run { pickedAvatar = nil }
+            }
+        }
         .onAppear { refreshPermissions() }
         .onChange(of: profileScene) { _ in refreshPermissions() }
         .alert("確定登出？", isPresented: $showLogout) {
