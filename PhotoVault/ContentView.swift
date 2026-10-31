@@ -759,17 +759,22 @@ struct UploadingView: View {
 struct HomeView: View {
     @EnvironmentObject var store: AppStore
     @State private var showProfile = false
+    @State private var showSpeedTest = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 14) {
+            VStack(spacing: 16) {
                 Spacer()
                 Image(systemName: "hammer.fill")
-                    .font(.system(size: 46, weight: .light))
-                    .foregroundStyle(.white.opacity(0.22))
+                    .font(.system(size: 42, weight: .light))
+                    .foregroundStyle(.white.opacity(0.20))
                 Text("內容正在開發中")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+
+                speedEntry
+                    .padding(.top, 22)
+
                 Spacer()
             }
             .frame(maxWidth: .infinity)
@@ -803,6 +808,62 @@ struct HomeView: View {
         .sheet(isPresented: $showProfile) {
             ProfileView().environmentObject(store)
         }
+        .fullScreenCover(isPresented: $showSpeedTest) {
+            SpeedTestView()
+        }
+    }
+
+    // 主頁的測速入口卡片
+    private var speedEntry: some View {
+        Button {
+            showSpeedTest = true
+        } label: {
+            HStack(spacing: 13) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(LinearGradient(colors: [PVTheme.teal.opacity(0.85), PVTheme.blue.opacity(0.85)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.03, green: 0.06, blue: 0.09))
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("網路診斷")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text("測速 · 延遲 · 抖動")
+                        .font(.system(size: 11))
+                        .tracking(0.4)
+                        .foregroundStyle(.white.opacity(0.38))
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 74)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(colors: [PVTheme.teal.opacity(0.35),
+                                                PVTheme.blue.opacity(0.18),
+                                                Color.white.opacity(0.05)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 1)
+            )
+            .shadow(color: PVTheme.blue.opacity(0.22), radius: 20, y: 10)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 26)
     }
 }
 
