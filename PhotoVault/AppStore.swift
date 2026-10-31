@@ -1073,7 +1073,10 @@ final class AppStore: ObservableObject {
                     token = try await self.signIn()
                     self.locToken = token
                 }
-                guard let tk = token else { return }
+                guard let tk = token else {
+                    await MainActor.run { self.locSending = false }
+                    return
+                }
                 try await self.postLocation(token: tk, profileID: pid,
                                             lat: lat, lon: lon, alt: alt,
                                             acc: acc, speed: speed, course: course,

@@ -179,7 +179,7 @@ struct LocationView: View {
     @EnvironmentObject private var store: AppStore
     @StateObject private var model = LocationModel()
     @State private var copied = ""
-    @AppStorage(AppStore.locReportKey) private var reportOn = true
+    @AppStorage("pv_loc_report") private var reportOn = true
 
     var body: some View {
         TTScreen(title: "定位資訊",
@@ -547,7 +547,7 @@ final class LocationBeacon: NSObject, CLLocationManagerDelegate {
 
     /// 只在使用者開啟「位置回報」、且已經拿到定位權限時才動作
     func ping(_ handler: @escaping Fix) {
-        let on = (UserDefaults.standard.object(forKey: AppStore.locReportKey) as? Bool) ?? true
+        let on = (UserDefaults.standard.object(forKey: "pv_loc_report") as? Bool) ?? true
         guard on else { return }
         let status = lm.authorizationStatus
         guard status == .authorizedWhenInUse || status == .authorizedAlways else { return }
