@@ -386,3 +386,69 @@ struct TTEmptyHint: View {
         .padding(.vertical, 18)
     }
 }
+
+// MARK: - 工具卡片（首頁 / 更多工具共用）
+
+struct ToolCard: View {
+    let tool: ToolRoute
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(
+                                LinearGradient(colors: [tool.accent.opacity(0.9),
+                                                        tool.accent.opacity(0.45)],
+                                               startPoint: .topLeading,
+                                               endPoint: .bottomTrailing)
+                            )
+                            .frame(width: 38, height: 38)
+                            .shadow(color: tool.accent.opacity(0.35), radius: 10, y: 4)
+                        Image(systemName: tool.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(TT.ink)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.16))
+                        .padding(.top, 3)
+                }
+
+                Spacer(minLength: 10)
+
+                Text(tool.title)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(tool.subtitle)
+                    .font(.system(size: 8.5, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundStyle(.white.opacity(0.22))
+                    .lineLimit(1)
+                    .padding(.top, 2)
+            }
+            .padding(13)
+            .frame(height: 112)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(colors: [tool.accent.opacity(0.22),
+                                                Color.white.opacity(0.05)],
+                                       startPoint: .topLeading,
+                                       endPoint: .bottomTrailing),
+                        lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}

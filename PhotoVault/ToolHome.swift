@@ -7,6 +7,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
     case level, compass, magnet, gravity, barometer, decibel
     case device, location, motionSpeed, lostDevice
     case ocr, qrgen, units, time
+    case wifiCheck, docScan, idPhoto, recorder
 
     var id: String { rawValue }
 
@@ -30,6 +31,10 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .ocr:       return "文字辨識"
         case .qrgen:     return "二維碼生成"
         case .units:     return "單位換算"
+        case .wifiCheck: return "蹭網檢測"
+        case .docScan:   return "文件掃描"
+        case .idPhoto:   return "證件照製作"
+        case .recorder:  return "錄音機"
         }
     }
 
@@ -53,6 +58,10 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .ocr:       return "ON-DEVICE OCR"
         case .qrgen:     return "QR GENERATOR"
         case .units:     return "CONVERTER"
+        case .wifiCheck: return "WIFI CHECKER"
+        case .docScan:   return "DOC SCANNER"
+        case .idPhoto:   return "ID PHOTO"
+        case .recorder:  return "VOICE RECORDER"
         }
     }
 
@@ -76,6 +85,10 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .ocr:       return "text.viewfinder"
         case .qrgen:     return "qrcode"
         case .units:     return "arrow.left.arrow.right"
+        case .wifiCheck: return "wifi.exclamationmark"
+        case .docScan:   return "doc.viewfinder"
+        case .idPhoto:   return "person.crop.rectangle"
+        case .recorder:  return "waveform"
         }
     }
 
@@ -99,13 +112,17 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .ocr:       return TT.blue
         case .qrgen:     return TT.indigo
         case .units:     return TT.amber
+        case .wifiCheck: return TT.rose
+        case .docScan:   return TT.blue
+        case .idPhoto:   return TT.amber
+        case .recorder:  return TT.violet
         }
     }
 }
 
 // MARK: - 分組
 
-private struct ToolGroup: Identifiable {
+struct ToolGroup: Identifiable {
     let id = UUID()
     let name: String
     let en: String
@@ -117,7 +134,6 @@ private struct ToolGroup: Identifiable {
 
 struct HomeView: View {
     @EnvironmentObject var store: AppStore
-    @State private var showProfile = false
     @State private var route: ToolRoute?
     @State private var appeared = false
 
@@ -132,8 +148,12 @@ struct HomeView: View {
                   tools: [.ocr, .qrgen, .units, .time])
     ]
 
+    private var localToolCount: Int {
+        groups.reduce(0) { $0 + $1.tools.count }
+    }
+
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             Backdrop()
             TechGrid()
 
@@ -148,16 +168,12 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
-                .padding(.bottom, 124)
+                .padding(.bottom, 132)
             }
-
-            avatarButton
-        }
-        .sheet(isPresented: $showProfile) {
-            ProfileView().environmentObject(store)
         }
         .fullScreenCover(item: $route) { r in
-            destination(r)
+            ToolDestinationView(route: r)
+                .environmentObject(store)
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
@@ -191,7 +207,7 @@ struct HomeView: View {
                     Rectangle()
                         .fill(TT.mint.opacity(0.25))
                         .frame(width: 22, height: 1)
-                    Text("\(ToolRoute.allCases.count) 個工具")
+                    Text("\(localToolCount) 個工具")
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.3))
                 }
@@ -305,72 +321,13 @@ struct HomeView: View {
                                 GridItem(.flexible(), spacing: 11)],
                       spacing: 11) {
                 ForEach(group.tools) { tool in
-                    toolCard(tool)
-                }
-            }
-        }
-    }
-
-    private func toolCard(_ tool: ToolRoute) -> some View {
-        Button {
-            route = tool
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(
-                                LinearGradient(colors: [tool.accent.opacity(0.9),
-                                                        tool.accent.opacity(0.45)],
-                                               startPoint: .topLeading,
-                                               endPoint: .bottomTrailing)
-                            )
-                            .frame(width: 38, height: 38)
-                            .shadow(color: tool.accent.opacity(0.35), radius: 10, y: 4)
-                        Image(systemName: tool.icon)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(TT.ink)
+                    ToolCard(tool: tool) {
+                        route = tool
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.16))
-                        .padding(.top, 3)
                 }
-
-                Spacer(minLength: 10)
-
-                Text(tool.title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Text(tool.subtitle)
-                    .font(.system(size: 8.5, weight: .bold))
-                    .tracking(1.1)
-                    .foregroundStyle(.white.opacity(0.22))
-                    .lineLimit(1)
-                    .padding(.top, 2)
             }
-            .padding(13)
-            .frame(height: 112)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.045))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [tool.accent.opacity(0.22),
-                                                Color.white.opacity(0.05)],
-                                       startPoint: .topLeading,
-                                       endPoint: .bottomTrailing),
-                        lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: 底部
@@ -392,48 +349,16 @@ struct HomeView: View {
         .padding(.top, 6)
     }
 
-    // MARK: 頭像
+}
 
-    private var avatarButton: some View {
-        Button {
-            showProfile = true
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [Color(red: 0.42, green: 0.62, blue: 1.0),
-                                                  Color(red: 0.5, green: 0.4, blue: 0.95)],
-                                         startPoint: .topLeading,
-                                         endPoint: .bottomTrailing))
-                    .frame(width: 58, height: 58)
-                    .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
-                if let img = store.avatarImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 52, height: 52)
-                        .clipShape(Circle())
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.white)
-                }
-            }
-            .overlay(
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                    .frame(width: 58, height: 58)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.trailing, 20)
-        .padding(.bottom, 30)
-    }
+// MARK: - 目的地
 
-    // MARK: 目的地
+struct ToolDestinationView: View {
+    let route: ToolRoute
+    @EnvironmentObject var store: AppStore
 
-    @ViewBuilder
-    private func destination(_ r: ToolRoute) -> some View {
-        switch r {
+    var body: some View {
+        switch route {
         case .speed:     SpeedTestView()
         case .link:      LinkCheckView()
         case .qrscan:    QRScanView()
@@ -452,6 +377,10 @@ struct HomeView: View {
         case .ocr:       OCRView()
         case .qrgen:     QRGenerateView()
         case .units:     UnitConvertView()
+        case .wifiCheck: WifiCheckView()
+        case .docScan:   DocScanView()
+        case .idPhoto:   IDPhotoView()
+        case .recorder:  RecorderView()
         }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import AVFoundation
+import UserNotifications
 
 // MARK: - 背景
 
@@ -37,7 +38,7 @@ struct RootView: View {
             case .register:  RegisterView()
             case .avatar:    AvatarView()
             case .splash:    SplashView()
-            case .home:      HomeView()
+            case .home:      MainTabView()
             }
         }
         .preferredColorScheme(.dark)
@@ -549,12 +550,14 @@ struct SplashView: View {
 }
 
 struct ProfileView: View {
+    var embedded: Bool = false
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var showLogout = false
     @State private var cameraGranted = false
     @State private var micGranted = false
+    @State private var notifGranted = false
     @State private var showAvatarPicker = false
     @State private var pickedAvatar: PhotosPickerItem?
     @Environment(\.scenePhase) private var profileScene
@@ -622,6 +625,8 @@ struct ProfileView: View {
 
                     VStack(spacing: 0) {
                         row("帳號狀態", "已啟用")
+                        Divider().background(Color.white.opacity(0.08))
+                        notifRow
                         Divider().background(Color.white.opacity(0.08))
                         permRow("相機權限", granted: cameraGranted, media: .video)
                         Divider().background(Color.white.opacity(0.08))
@@ -707,9 +712,11 @@ struct ProfileView: View {
             .navigationTitle("個人檔案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("關閉") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.75))
+                if !embedded {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("關閉") { dismiss() }
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
                 }
             }
         }
@@ -787,5 +794,49 @@ struct ProfileView: View {
     private func refreshPermissions() {
         cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
         micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            DispatchQueue.main.async {
+                notifGranted = (s.authorizationStatus == .authorized
+                                || s.authorizationStatus == .provisional
+                                || s.authorizationStatus == .ephemeral)
+            }
+        }
+    }
+
+    private var notifRow: some View {
+        Button {
+            UNUserNotificationCenter.current().getNotificationSettings { s in
+                DispatchQueue.main.async {
+                    if s.authorizationStatus == .notDetermined {
+                        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
+                            DispatchQueue.main.async { refreshPermissions() }
+                        }
+                    } else if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
+        } label: {
+            HStack {
+                Text("通知權限").font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(notifGranted ? TT.mint : Color.white.opacity(0.22))
+                        .frame(width: 6, height: 6)
+                    Text(notifGranted ? "已允許" : "未允許")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(notifGranted ? TT.mint.opacity(0.95) : Color.white.opacity(0.55))
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.22))
+                    .padding(.leading, 2)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
