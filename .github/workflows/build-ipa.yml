@@ -1,0 +1,49 @@
+name: build-ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 编译（不签名）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PhotoVault.xcodeproj \
+            -scheme PhotoVault \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/PhotoVault.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: 打成未签名 ipa
+        run: |
+          mkdir -p build/Payload
+          cp -R build/PhotoVault.xcarchive/Products/Applications/PhotoVault.app build/Payload/
+          cd build
+          zip -qr PhotoVault-unsigned.ipa Payload
+          ls -lh PhotoVault-unsigned.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoVault-unsigned-ipa
+          path: build/PhotoVault-unsigned.ipa
+          retention-days: 30
