@@ -90,6 +90,7 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
     @Published var route: [CLLocationCoordinate2D] = []
     @Published var denied = false
     @Published var gpsReady = false
+    @Published var stationary = false
     @Published var history: [SpeedRun] = []
     @Published var unit: SpeedUnit = .kmh {
         didSet { UserDefaults.standard.set(unit.rawValue, forKey: "pv_speed_unit") }
@@ -102,12 +103,15 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
     private var lastPoint: CLLocation?
     private var lastAlt: Double?
     private var hasFix = false
+    private var samples: [CLLocation] = []
+    private var stillTicks = 0
+    private var lastFixAt: Date?
 
     override init() {
         super.init()
         lm.delegate = self
         lm.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        lm.distanceFilter = 1.5
+        lm.distanceFilter = kCLDistanceFilterNone
         lm.activityType = .fitness
         if let raw = UserDefaults.standard.string(forKey: "pv_speed_unit"),
            let u = SpeedUnit(rawValue: raw) {
@@ -154,6 +158,7 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self, !self.paused else { return }
             self.elapsed = self.rawElapsed
+            self.checkStaleFix()
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -162,6 +167,14 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    /// 車停下來之後系統幾乎不再回報位置，靠這個兜底把速度歸零
+    private func checkStaleFix() {
+        guard running, !paused, let t = lastFixAt else { return }
+        guard Date().timeIntervalSince(t) > 2.2 else { return }
+        if current != 0 { current = 0 }
+        if !stationary { stationary = true }
     }
 
     private var rawElapsed: Double {
@@ -188,6 +201,9 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         segStart = nil
         elapsed = accumulated
         current = 0
+        stationary = false
+        samples = []
+        stillTicks = 0
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
@@ -207,6 +223,7 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         running = false
         paused = false
         current = 0
+        stationary = false
         stopTimer()
         if elapsed >= 3, distance >= 10 {
             let run = SpeedRun(date: Date(),
@@ -235,6 +252,9 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         route = []
         lastPoint = nil
         lastAlt = nil
+        samples = []
+        stillTicks = 0
+        stationary = false
         if manual {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
@@ -249,22 +269,63 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
+        // 太舊的點（快取位置）不能拿來算瞬時速度
+        guard loc.horizontalAccuracy > 0, loc.timestamp.timeIntervalSinceNow > -6 else { return }
+
         hasFix = true
         gpsReady = true
+        lastFixAt = Date()
         accuracy = loc.horizontalAccuracy
         if loc.verticalAccuracy > 0 { altitude = loc.altitude }
 
-        // 瞬時速度：GPS 給負值代表靜止
-        let s = loc.speed >= 0 ? loc.speed : 0
-        if !paused {
-            // 顯示值做一點平滑，避免數字亂跳
-            current = current * 0.35 + s * 0.65
-            if s > maxSpeed { maxSpeed = s }
-        } else {
-            current = 0
+        // 保留最近 3.5 秒的樣本，用「實際位移」推算真實速度
+        samples.append(loc)
+        samples.removeAll { loc.timestamp.timeIntervalSince($0.timestamp) > 3.5 }
+
+        var span: Double = 0
+        var moved: Double = 0
+        var moveSpeed: Double = -1
+        if let first = samples.first, samples.count >= 2 {
+            span = loc.timestamp.timeIntervalSince(first.timestamp)
+            if span > 0.8 {
+                moved = loc.distance(from: first)
+                moveSpeed = moved / span
+            }
         }
 
-        guard running, !paused, loc.horizontalAccuracy > 0, loc.horizontalAccuracy < 55 else {
+        // 瞬時速度：GPS 給負值代表靜止；speedAccuracy 太差代表這個值不可信
+        var raw = max(loc.speed, 0)
+        if loc.speedAccuracy > 2.5, moveSpeed >= 0 { raw = moveSpeed }
+
+        // 停車後 GPS 瞬時速度會殘留好幾秒，所以用位移當主判據：
+        // 短窗幾乎沒動（<0.5m/1.2s）或長窗明顯沒動（<2.2m/2.8s）都算停下來
+        let stillFast = span >= 1.2 && moved < 0.5 && raw < 2.5
+        let stillSteady = span >= 2.8 && moved < 2.2
+        let stillNow = stillFast || stillSteady
+        stillTicks = stillNow ? stillTicks + 1 : 0
+
+        if paused {
+            current = 0
+            stationary = false
+            if lastPoint == nil { lastPoint = loc }
+            return
+        }
+
+        if stillTicks >= 1 {
+            // 已靜止：速度直接歸零，也不刷新最高時速
+            stationary = true
+            current = 0
+        } else {
+            stationary = false
+            let blended = moveSpeed >= 0 ? (raw * 0.6 + moveSpeed * 0.4) : raw
+            current = current * 0.3 + blended * 0.7
+            if current < 0.4 { current = 0 }
+            // 抗噪：單次跳點不計入峰值（用位移速度壓一下離譜數值）
+            let candidate = moveSpeed >= 0 ? min(raw, moveSpeed * 1.6 + 1.5) : raw
+            if candidate > maxSpeed, candidate < 130 { maxSpeed = candidate }
+        }
+
+        guard running, !paused, loc.horizontalAccuracy < 55 else {
             if lastPoint == nil { lastPoint = loc }
             return
         }
@@ -272,8 +333,8 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         if let prev = lastPoint {
             let step = loc.distance(from: prev)
             let dt = loc.timestamp.timeIntervalSince(prev.timestamp)
-            // 過濾 GPS 漂移：一次跳太遠或時間沒前進都不算
-            if step >= 1.2, step <= max(120, s * max(dt, 1) * 3), dt > 0, dt < 60 {
+            // 過濾 GPS 漂移：位移太小、跳太遠、時間沒前進都不算
+            if step >= 1.2, step <= max(120, raw * max(dt, 1) * 3), dt > 0, dt < 60, !stationary {
                 distance += step
                 route.append(loc.coordinate)
             }
@@ -282,8 +343,8 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         }
         lastPoint = loc
 
-        // 海拔累計
-        if loc.verticalAccuracy > 0, loc.verticalAccuracy < 30 {
+        // 海拔累計（靜止時不累加，免得抖動虛增上升下降）
+        if !stationary, loc.verticalAccuracy > 0, loc.verticalAccuracy < 30 {
             if let prevAlt = lastAlt {
                 let diff = loc.altitude - prevAlt
                 if abs(diff) >= 1.2 {
@@ -467,6 +528,15 @@ struct MotionSpeedView: View {
                          : "正在取得 GPS 訊號…")
                         .font(.system(size: 10.5))
                         .foregroundStyle(.white.opacity(0.42))
+                    if model.running, !model.paused, model.stationary {
+                        Text("已靜止")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(TT.ink)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(TT.mint.opacity(0.85)))
+                            .transition(.opacity)
+                    }
                 }
             }
             .padding(.vertical, 6)
