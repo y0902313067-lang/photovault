@@ -472,7 +472,17 @@ struct AvatarView: View {
 
             Spacer(minLength: 20)
 
-            PrimaryButton(title: "下一步", enabled: store.canContinueAvatar) {
+            if let err = store.errorText, !err.isEmpty {
+                Text(err)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(red: 1.0, green: 0.48, blue: 0.55))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 10)
+            }
+
+            PrimaryButton(title: store.running ? "正在建立帳號…" : "下一步",
+                          enabled: store.canContinueAvatar && !store.running) {
                 store.persistAvatar()
                 store.startUploading()
             }
