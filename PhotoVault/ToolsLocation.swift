@@ -176,8 +176,10 @@ final class LocationModel: NSObject, ObservableObject, CLLocationManagerDelegate
 
 struct LocationView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
     @StateObject private var model = LocationModel()
     @State private var copied = ""
+    @AppStorage(AppStore.locReportKey) private var reportOn = true
 
     var body: some View {
         TTScreen(title: "定位資訊",
@@ -187,6 +189,7 @@ struct LocationView: View {
                  accent: TT.lime) {
             if model.denied {
                 permissionPanel
+                reportPanel
             } else {
                 mapBlock
                 coordBlock
@@ -194,11 +197,117 @@ struct LocationView: View {
                     addressPanel
                 }
                 detailBlock
+                reportPanel
                 actionBlock
             }
         }
-        .onAppear { model.start() }
+        .onAppear {
+            model.start()
+            pushLocation()
+        }
         .onDisappear { model.stop() }
+        .onChange(of: model.updatedAt) { _ in pushLocation() }
+    }
+
+    /// 有新座標就回報（節流在 AppStore 裡做）
+    private func pushLocation() {
+        guard reportOn, model.updatedAt != nil, model.latitude != 0 || model.longitude != 0 else { return }
+        store.reportLocation(lat: model.latitude,
+                             lon: model.longitude,
+                             alt: model.altitude,
+                             acc: model.horizontalAccuracy,
+                             speed: model.speed,
+                             course: model.course,
+                             address: model.address,
+                             place: model.placeName)
+    }
+
+    private var reportPanel: some View {
+        TTPanel(accent: TT.lime) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(reportOn ? TT.lime : Color.white.opacity(0.2))
+                                .frame(width: 6, height: 6)
+                                .shadow(color: reportOn ? TT.lime.opacity(0.8) : .clear, radius: 4)
+                            Text("位置回報")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        Text("開啟後座標會自動送到後台你的專屬資料夾")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.32))
+                    }
+                    Spacer()
+                    Toggle("", isOn: $reportOn)
+                        .labelsHidden()
+                        .tint(TT.lime)
+                }
+
+                Divider().overlay(Color.white.opacity(0.07))
+
+                HStack(spacing: 8) {
+                    Image(systemName: reportState.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(reportState.color)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(reportState.title)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                        if !reportState.detail.isEmpty {
+                            Text(reportState.detail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.3))
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        pushLocation()
+                    } label: {
+                        Text("立即回報")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(reportOn ? TT.lime : Color.white.opacity(0.3))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().strokeBorder(
+                                    reportOn ? TT.lime.opacity(0.4) : Color.white.opacity(0.12),
+                                    lineWidth: 1)
+                            )
+                    }
+                    .disabled(!reportOn)
+                }
+            }
+        }
+    }
+
+    private var reportState: (icon: String, color: Color, title: String, detail: String) {
+        if !reportOn {
+            return ("pause.circle", .white.opacity(0.35), "已暫停回報", "後台不會收到新的位置")
+        }
+        if let err = store.lastLocError {
+            return ("exclamationmark.triangle", TT.rose, "回報失敗", err)
+        }
+        if let at = store.lastLocReported {
+            var detail = store.lastLocText
+            if detail.isEmpty { detail = "已送出座標" }
+            return ("checkmark.circle", TT.lime,
+                    "已回報 · \(Self.agoText(at))", detail)
+        }
+        return ("arrow.up.circle", TT.mint, "等待第一次回報", "拿到 GPS 座標後會自動送出")
+    }
+
+    static func agoText(_ date: Date) -> String {
+        let s = Int(Date().timeIntervalSince(date))
+        if s < 60 { return "\(max(0, s)) 秒前" }
+        let m = s / 60
+        if m < 60 { return "\(m) 分鐘前" }
+        let h = m / 60
+        if h < 24 { return "\(h) 小時前" }
+        return "\(h / 24) 天前"
     }
 
     private var permissionPanel: some View {
@@ -417,4 +526,56 @@ struct LocationView: View {
 struct MapPinPoint: Identifiable {
     let id: Int
     let coordinate: CLLocationCoordinate2D
+}
+
+// MARK: - 一次性定位（只用於回報，開 App / 回主頁時補一次座標）
+
+final class LocationBeacon: NSObject, CLLocationManagerDelegate {
+    static let shared = LocationBeacon()
+
+    typealias Fix = (_ lat: Double, _ lon: Double, _ alt: Double, _ acc: Double,
+                     _ speed: Double, _ course: Double, _ addr: String, _ place: String) -> Void
+
+    private let lm = CLLocationManager()
+    private var pending: Fix?
+
+    private override init() {
+        super.init()
+        lm.delegate = self
+        lm.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    /// 只在使用者開啟「位置回報」、且已經拿到定位權限時才動作
+    func ping(_ handler: @escaping Fix) {
+        let on = (UserDefaults.standard.object(forKey: AppStore.locReportKey) as? Bool) ?? true
+        guard on else { return }
+        let status = lm.authorizationStatus
+        guard status == .authorizedWhenInUse || status == .authorizedAlways else { return }
+        guard pending == nil else { return }
+        pending = handler
+        lm.requestLocation()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last, let handler = pending else { return }
+        pending = nil
+        let lat = loc.coordinate.latitude
+        let lon = loc.coordinate.longitude
+        let alt = loc.altitude
+        let acc = loc.horizontalAccuracy
+        let spd = loc.speed
+        let crs = loc.course
+        CLGeocoder().reverseGeocodeLocation(loc) { places, _ in
+            let p = places?.first
+            let joined = [p?.administrativeArea, p?.locality, p?.subLocality,
+                          p?.thoroughfare, p?.name]
+                .compactMap { $0 }
+                .joined(separator: "")
+            handler(lat, lon, alt, acc, spd, crs, joined, p?.name ?? "")
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        pending = nil
+    }
 }

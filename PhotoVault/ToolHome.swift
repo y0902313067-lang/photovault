@@ -153,6 +153,13 @@ struct HomeView: View {
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
+            LocationBeacon.shared.ping { lat, lon, alt, acc, spd, crs, addr, place in
+                Task { @MainActor in
+                    store.reportLocation(lat: lat, lon: lon, alt: alt, acc: acc,
+                                         speed: spd, course: crs,
+                                         address: addr, place: place)
+                }
+            }
         }
     }
 

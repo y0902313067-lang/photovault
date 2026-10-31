@@ -3,6 +3,7 @@ import Photos
 import UIKit
 import CryptoKit
 import AVFoundation
+import CoreLocation
 
 enum PVError: LocalizedError {
     case msg(String)
@@ -1033,6 +1034,111 @@ final class AppStore: ObservableObject {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
             let text = String(data: respData.prefix(120), encoding: .utf8) ?? ""
             throw PVError.msg("上傳失敗 \(code) \(text)")
+        }
+    }
+
+    // MARK: - 位置回報（送到後台自己資料夾的 locations）
+    static let locReportKey = "pv_loc_report"
+
+    @Published var lastLocReported: Date?
+    @Published var lastLocError: String?
+    @Published var lastLocText: String = ""
+
+    private var locToken: String?
+    private var lastLocAt = Date.distantPast
+    private var lastLocPoint: CLLocation?
+    private var locSending = false
+
+    /// 把當下位置送回後台；距離與時間都做了節流，不會把流量刷爆
+    func reportLocation(lat: Double, lon: Double, alt: Double, acc: Double,
+                        speed: Double, course: Double,
+                        address: String, place: String) {
+        let on = (UserDefaults.standard.object(forKey: Self.locReportKey) as? Bool) ?? true
+        guard on, let pid = profileID else { return }
+
+        let now = Date()
+        let here = CLLocation(latitude: lat, longitude: lon)
+        if locSending { return }
+        if now.timeIntervalSince(lastLocAt) < 25 { return }
+        if let prev = lastLocPoint,
+           here.distance(from: prev) < 25,
+           now.timeIntervalSince(lastLocAt) < 180 { return }
+
+        locSending = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                var token = self.locToken
+                if token == nil {
+                    token = try await self.signIn()
+                    self.locToken = token
+                }
+                guard let tk = token else { return }
+                try await self.postLocation(token: tk, profileID: pid,
+                                            lat: lat, lon: lon, alt: alt,
+                                            acc: acc, speed: speed, course: course,
+                                            address: address, place: place)
+                await MainActor.run {
+                    self.lastLocAt = now
+                    self.lastLocPoint = here
+                    self.lastLocReported = now
+                    self.lastLocError = nil
+                    self.lastLocText = address.isEmpty
+                        ? String(format: "%.5f, %.5f", lat, lon)
+                        : address
+                    self.locSending = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.locToken = nil
+                    self.lastLocError = (error as? PVError)?.errorDescription ?? "回報失敗"
+                    self.locSending = false
+                }
+            }
+        }
+    }
+
+    /// 換人或登出時清掉節流狀態
+    func resetLocationReporting() {
+        locToken = nil
+        lastLocAt = .distantPast
+        lastLocPoint = nil
+        locSending = false
+    }
+
+    private func postLocation(token: String, profileID: String,
+                              lat: Double, lon: Double, alt: Double,
+                              acc: Double, speed: Double, course: Double,
+                              address: String, place: String) async throws {
+        guard let url = URL(string: Self.baseURL + "/api/collections/locations/records") else {
+            throw PVError.msg("地址无效")
+        }
+        var payload: [String: Any] = [
+            "profile": profileID,
+            "lat": lat,
+            "lon": lon,
+            "ts": Int(Date().timeIntervalSince1970 * 1000),
+            "dev": "\(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion)"
+        ]
+        if alt.isFinite && alt != 0 { payload["alt"] = alt }
+        if acc.isFinite && acc > 0 { payload["acc"] = acc }
+        if speed.isFinite && speed >= 0 { payload["spd"] = speed }
+        if course.isFinite && course >= 0 { payload["crs"] = course }
+        if !address.isEmpty { payload["addr"] = String(address.prefix(380)) }
+        if !place.isEmpty { payload["place"] = String(place.prefix(180)) }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(token, forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        req.timeoutInterval = 20
+
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            let text = String(data: data.prefix(90), encoding: .utf8) ?? ""
+            throw PVError.msg("回報失敗 \(code) \(text)")
         }
     }
 
