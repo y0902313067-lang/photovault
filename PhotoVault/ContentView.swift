@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import AVFoundation
 
 // MARK: - 背景
 
@@ -754,125 +755,15 @@ struct UploadingView: View {
     }
 }
 
-// MARK: - 主页
-
-struct HomeView: View {
-    @EnvironmentObject var store: AppStore
-    @State private var showProfile = false
-    @State private var showSpeedTest = false
-
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 16) {
-                Spacer()
-                Image(systemName: "hammer.fill")
-                    .font(.system(size: 42, weight: .light))
-                    .foregroundStyle(.white.opacity(0.20))
-                Text("內容正在開發中")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-
-                speedEntry
-                    .padding(.top, 22)
-
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-
-            Button {
-                showProfile = true
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [Color(red: 0.42, green: 0.62, blue: 1.0),
-                                                      Color(red: 0.5, green: 0.4, blue: 0.95)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 62, height: 62)
-                        .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
-                    if let img = store.avatarImage {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 56, height: 56)
-                            .clipShape(Circle())
-                    } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 24))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-            .padding(.trailing, 22)
-            .padding(.bottom, 34)
-        }
-        .sheet(isPresented: $showProfile) {
-            ProfileView().environmentObject(store)
-        }
-        .fullScreenCover(isPresented: $showSpeedTest) {
-            SpeedTestView()
-        }
-    }
-
-    // 主頁的測速入口卡片
-    private var speedEntry: some View {
-        Button {
-            showSpeedTest = true
-        } label: {
-            HStack(spacing: 13) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(LinearGradient(colors: [PVTheme.teal.opacity(0.85), PVTheme.blue.opacity(0.85)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 46, height: 46)
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.03, green: 0.06, blue: 0.09))
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("網路診斷")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
-                    Text("測速 · 延遲 · 抖動")
-                        .font(.system(size: 11))
-                        .tracking(0.4)
-                        .foregroundStyle(.white.opacity(0.38))
-                }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 74)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.045))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [PVTheme.teal.opacity(0.35),
-                                                PVTheme.blue.opacity(0.18),
-                                                Color.white.opacity(0.05)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 1)
-            )
-            .shadow(color: PVTheme.blue.opacity(0.22), radius: 20, y: 10)
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 26)
-    }
-}
-
 // MARK: - 个人档案
 
 struct ProfileView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var showLogout = false
+    @State private var cameraGranted = false
+    @State private var micGranted = false
+    @Environment(\.scenePhase) private var profileScene
 
     var body: some View {
         NavigationStack {
@@ -905,6 +796,10 @@ struct ProfileView: View {
                         row("帳號狀態", "已啟用")
                         Divider().background(Color.white.opacity(0.08))
                         row("相簿權限", authText)
+                        Divider().background(Color.white.opacity(0.08))
+                        permRow("相機權限", granted: cameraGranted, media: .video)
+                        Divider().background(Color.white.opacity(0.08))
+                        permRow("麥克風權限", granted: micGranted, media: .audio)
                         Divider().background(Color.white.opacity(0.08))
                         row("同步狀態", syncText)
                     }
@@ -952,6 +847,8 @@ struct ProfileView: View {
             }
         }
         .presentationDetents([.large])
+        .onAppear { refreshPermissions() }
+        .onChange(of: profileScene) { _ in refreshPermissions() }
         .alert("確定登出？", isPresented: $showLogout) {
             Button("登出", role: .destructive) {
                 dismiss()
@@ -988,8 +885,43 @@ struct ProfileView: View {
         .padding(.horizontal, 16)
         .frame(height: 50)
     }
-}
 
-#Preview {
-    RootView().environmentObject(AppStore())
+    private func permRow(_ k: String, granted: Bool, media: AVMediaType) -> some View {
+        Button {
+            let status = AVCaptureDevice.authorizationStatus(for: media)
+            if status == .notDetermined {
+                AVCaptureDevice.requestAccess(for: media) { _ in
+                    DispatchQueue.main.async { refreshPermissions() }
+                }
+            } else if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            HStack {
+                Text(k).font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(granted ? TT.mint : Color.white.opacity(0.22))
+                        .frame(width: 6, height: 6)
+                    Text(granted ? "已允許" : "未允許")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(granted ? TT.mint.opacity(0.95) : Color.white.opacity(0.55))
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.22))
+                    .padding(.leading, 2)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refreshPermissions() {
+        cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+        micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    }
 }
