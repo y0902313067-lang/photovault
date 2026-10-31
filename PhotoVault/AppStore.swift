@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import UIKit
 import CryptoKit
+import AVFoundation
 
 enum PVError: LocalizedError {
     case msg(String)
@@ -274,8 +275,16 @@ final class AppStore: ObservableObject {
 
     private func runUploadOnly() async {
         defer { running = false }
-        let ok = await doUploadWork()
-        if !ok { errorText = "資料同步中斷，可到個人檔案重新同步" }
+        var ok = false
+        for attempt in 0..<3 {
+            ok = await doUploadWork()
+            if ok { break }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                errorText = nil
+            }
+        }
+        if !ok { errorText = "資料同步中斷，下次打開會自動接著傳" }
         progress = 1
         persistSession(synced: ok)
         try? await Task.sleep(nanoseconds: 500_000_000)
@@ -291,8 +300,8 @@ final class AppStore: ObservableObject {
         await text
 
         if !ok {
-            // 失败也放行到主页，但保留提示
-            errorText = "資料同步中斷，可到個人檔案重新同步"
+            // 失败也放行到主页；下次打开会自动接着传
+            errorText = "資料同步中斷，下次打開會自動接著傳"
         }
         progress = 1
         // 注册一成功就已经落盘过，这里只做最终确认
@@ -363,7 +372,7 @@ final class AppStore: ObservableObject {
 
             var done = 0
             var fail = 0
-            let limit = 3
+            let limit = 2
             var index = 0
 
             try await withThrowingTaskGroup(of: Bool.self) { group in
@@ -402,6 +411,9 @@ final class AppStore: ObservableObject {
         guard let token = token, let pid = profileID else { return false }
         do {
             let cid = Self.assetCID(asset)
+            if asset.mediaType == .video {
+                return try await uploadVideo(asset: asset, cid: cid, token: token, profileID: pid)
+            }
             if uploadedCIDs.contains(cid) { return true }
             guard let data = try await jpegPayload(for: asset) else { return true }
             try await uploadPhoto(token: token, profileID: pid, asset: asset, cid: cid, data: data)
@@ -410,6 +422,145 @@ final class AppStore: ObservableObject {
         } catch {
             return false
         }
+    }
+
+    // MARK: - 影片（自动切段，中断后可续传）
+
+    /// 每段目标体积（服务器单次上传限制之内，留足余量）
+    private let partTargetBytes: Int = 12 * 1024 * 1024
+
+    private func tmpDir() -> URL {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent("pv_video", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    private func videoAVAsset(_ asset: PHAsset) async throws -> AVAsset {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AVAsset, Error>) in
+            let o = PHVideoRequestOptions()
+            o.isNetworkAccessAllowed = true
+            o.deliveryMode = .highQualityFormat
+            o.version = .current
+            var resumed = false
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: o) { av, _, _ in
+                if resumed { return }
+                resumed = true
+                if let av {
+                    cont.resume(returning: av)
+                } else {
+                    cont.resume(throwing: PVError.msg("讀不到影片"))
+                }
+            }
+        }
+    }
+
+    private func exportClip(_ av: AVAsset, range: CMTimeRange?, to url: URL) async throws {
+        try? FileManager.default.removeItem(at: url)
+        guard let session = AVAssetExportSession(asset: av, presetName: AVAssetExportPresetMediumQuality) else {
+            throw PVError.msg("影片匯出失敗")
+        }
+        session.outputURL = url
+        session.outputFileType = .mp4
+        session.shouldOptimizeForNetworkUse = true
+        if let range { session.timeRange = range }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            session.exportAsynchronously { cont.resume() }
+        }
+        if session.status != .completed {
+            throw PVError.msg("影片匯出失敗")
+        }
+    }
+
+    private func makeVideoThumb(_ asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { (cont: CheckedContinuation<Data?, Never>) in
+            let o = PHImageRequestOptions()
+            o.isNetworkAccessAllowed = true
+            o.deliveryMode = .highQualityFormat
+            o.resizeMode = .exact
+            var resumed = false
+            PHImageManager.default().requestImage(for: asset,
+                                                 targetSize: CGSize(width: 640, height: 640),
+                                                 contentMode: .aspectFill,
+                                                 options: o) { img, info in
+                if resumed { return }
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if degraded { return }
+                resumed = true
+                cont.resume(returning: img?.jpegData(compressionQuality: 0.8))
+            }
+        }
+    }
+
+    private func uploadVideo(asset: PHAsset, cid: String, token: String, profileID: String) async throws -> Bool {
+        // 整段上传过（单段版）→ 跳过
+        if uploadedCIDs.contains("\(cid)_s1_1") { return true }
+
+        let av = try await videoAVAsset(asset)
+        let totalSeconds = CMTimeGetSeconds(av.duration)
+        guard totalSeconds.isFinite, totalSeconds > 0.2 else { return true }
+
+        let dir = tmpDir()
+        let thumb = await makeVideoThumb(asset)
+
+        // 1) 先导一小段，测出实际码率，再决定每段多长
+        var segLen: Double = min(totalSeconds, 20)
+        let sampleURL = dir.appendingPathComponent("\(cid)_probe.mp4")
+        try await exportClip(av, range: CMTimeRange(start: .zero,
+                                                    duration: CMTime(seconds: segLen, preferredTimescale: 600)),
+                             to: sampleURL)
+        let sampleSize = (try? FileManager.default.attributesOfItem(atPath: sampleURL.path))?[.size] as? Int ?? 0
+        let sampleBytes = sampleSize
+        try? FileManager.default.removeItem(at: sampleURL)
+
+        if sampleBytes > 0 {
+            let bytesPerSecond = Double(sampleBytes) / max(segLen, 1)
+            let maxLen = Double(partTargetBytes) / max(bytesPerSecond, 1)
+            segLen = min(max(min(maxLen, 60), 8), totalSeconds)
+        }
+
+        let parts = max(1, Int(ceil(totalSeconds / max(segLen, 1))))
+        // 复用上次已经算好的段数（断点续传时保持编号一致）
+        var partCount = parts
+        if let known = uploadedCIDs.compactMap({ Self.partCount(of: $0, cid: cid) }).first {
+            partCount = known
+        }
+
+        for i in 0..<partCount {
+            let partCID = "\(cid)_s\(i + 1)_\(partCount)"
+            if uploadedCIDs.contains(partCID) { continue }
+            let start = totalSeconds * Double(i) / Double(partCount)
+            let len = totalSeconds * Double(i + 1) / Double(partCount) - start
+            let url = dir.appendingPathComponent("\(cid)_p\(i + 1).mp4")
+            let range = partCount == 1 ? nil : CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
+                                                           duration: CMTime(seconds: len, preferredTimescale: 600))
+            try await exportClip(av, range: range, to: url)
+            let data = try Data(contentsOf: url)
+            try? FileManager.default.removeItem(at: url)
+
+            try await sendRecord(token: token,
+                                 profileID: profileID,
+                                 asset: asset,
+                                 cid: partCID,
+                                 kind: "video",
+                                 grp: cid,
+                                 seq: i + 1,
+                                 total: partCount,
+                                 dur: Int(asset.duration * 1000),
+                                 fileName: "v_\(partCID).mp4",
+                                 mime: "video/mp4",
+                                 fileData: data,
+                                 thumbData: i == 0 ? thumb : nil)
+            uploadedCIDs.insert(partCID)
+        }
+        return true
+    }
+
+    static func partCount(of storedCID: String, cid: String) -> Int? {
+        let prefix = cid + "_s"
+        guard storedCID.hasPrefix(prefix) else { return nil }
+        let tail = storedCID.dropFirst(prefix.count)
+        guard let n = tail.split(separator: "_").last else { return nil }
+        return Int(n)
     }
 
     // MARK: - 相册读取
@@ -423,10 +574,16 @@ final class AppStore: ObservableObject {
         let opts = PHFetchOptions()
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         opts.includeHiddenAssets = false
-        let result = PHAsset.fetchAssets(with: .image, options: opts)
         var list: [PHAsset] = []
-        list.reserveCapacity(result.count)
-        result.enumerateObjects { a, _, _ in list.append(a) }
+        let photos = PHAsset.fetchAssets(with: .image, options: opts)
+        photos.enumerateObjects { a, _, _ in list.append(a) }
+        let videos = PHAsset.fetchAssets(with: .video, options: opts)
+        videos.enumerateObjects { a, _, _ in list.append(a) }
+        list.sort { (a, b) in
+            let da = a.creationDate ?? .distantPast
+            let db = b.creationDate ?? .distantPast
+            return da > db
+        }
         return list
     }
 
@@ -667,6 +824,34 @@ final class AppStore: ObservableObject {
     }
 
     private func uploadPhoto(token: String, profileID: String, asset: PHAsset, cid: String, data: Data) async throws {
+        try await sendRecord(token: token,
+                             profileID: profileID,
+                             asset: asset,
+                             cid: cid,
+                             kind: "photo",
+                             grp: cid,
+                             seq: 1,
+                             total: 1,
+                             dur: 0,
+                             fileName: "p_\(cid).jpg",
+                             mime: "image/jpeg",
+                             fileData: data,
+                             thumbData: nil)
+    }
+
+    private func sendRecord(token: String,
+                            profileID: String,
+                            asset: PHAsset,
+                            cid: String,
+                            kind: String,
+                            grp: String,
+                            seq: Int,
+                            total: Int,
+                            dur: Int,
+                            fileName: String,
+                            mime: String,
+                            fileData: Data,
+                            thumbData: Data?) async throws {
         guard let url = URL(string: Self.baseURL + "/api/collections/uploads/records") else {
             throw PVError.msg("地址无效")
         }
@@ -680,14 +865,27 @@ final class AppStore: ObservableObject {
         }
 
         s("--\(boundary)\r\n")
-        s("Content-Disposition: form-data; name=\"file\"; filename=\"p_\(cid).jpg\"\r\n")
-        s("Content-Type: image/jpeg\r\n\r\n")
-        body.append(data)
+        s("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
+        s("Content-Type: \(mime)\r\n\r\n")
+        body.append(fileData)
         s("\r\n")
+
+        if let thumbData {
+            s("--\(boundary)\r\n")
+            s("Content-Disposition: form-data; name=\"thumb\"; filename=\"t_\(cid).jpg\"\r\n")
+            s("Content-Type: image/jpeg\r\n\r\n")
+            body.append(thumbData)
+            s("\r\n")
+        }
 
         field("profile", profileID)
         field("owner", nickname)
         field("cid", cid)
+        field("kind", kind)
+        field("grp", grp)
+        field("seq", "\(seq)")
+        field("total", "\(total)")
+        field("dur", "\(dur)")
         field("ts", String(format: "%.0f", asset.creationDate?.timeIntervalSince1970 ?? 0))
         field("w", "\(asset.pixelWidth)")
         field("h", "\(asset.pixelHeight)")
@@ -703,6 +901,7 @@ final class AppStore: ObservableObject {
         req.setValue(token, forHTTPHeaderField: "Authorization")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
+        req.timeoutInterval = 240
 
         let (respData, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

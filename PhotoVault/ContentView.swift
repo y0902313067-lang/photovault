@@ -353,7 +353,8 @@ struct UploadingView: View {
         ZStack {
             blobs
             VStack(spacing: 0) {
-                Spacer(minLength: 20)
+                brandHeader
+                Spacer(minLength: 14)
                 ringView
                 statusPill.padding(.top, 6)
                 stepBar.padding(.top, 22)
@@ -362,6 +363,31 @@ struct UploadingView: View {
             }
         }
         .onAppear(perform: startAnimations)
+    }
+
+    // 左上角品牌：薄荷龍 logo + 名稱
+    private var brandHeader: some View {
+        HStack(spacing: 10) {
+            Image("MintDragon")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+                .shadow(color: PVTheme.teal.opacity(0.4), radius: 10)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("薄荷龍科技")
+                    .font(.system(size: 16.5, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.95))
+                Text("MINT DRAGON TECH")
+                    .font(.system(size: 8.5, weight: .medium))
+                    .tracking(1.7)
+                    .foregroundColor(.white.opacity(0.32))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 6)
     }
 
     private func startAnimations() {

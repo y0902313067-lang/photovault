@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>相簿備份</string>
+	<string>薄荷龍科技</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于把照片同步到你指定的后台服务器。</string>
+	<string>用于把照片和影片同步到你的后台服务器。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于把照片保存到相簿。</string>
 	<key>NSAppTransportSecurity</key>
