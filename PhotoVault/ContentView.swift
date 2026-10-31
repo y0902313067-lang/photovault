@@ -551,6 +551,7 @@ struct SplashView: View {
 struct ProfileView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var showLogout = false
     @State private var cameraGranted = false
     @State private var micGranted = false
@@ -594,6 +595,49 @@ struct ProfileView: View {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(Color.white.opacity(0.05))
                     )
+                    .padding(.horizontal, 18)
+
+                    Button {
+                        if let url = URL(string: "https://lin.ee/TYSCkcO") { openURL(url) }
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle().fill(Brand.mint.opacity(0.14))
+                                Circle().strokeBorder(Brand.mint.opacity(0.35), lineWidth: 0.8)
+                                Image(systemName: "bubble.left.and.bubble.right.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Brand.mint)
+                            }
+                            .frame(width: 32, height: 32)
+
+                            VStack(alignment: .leading, spacing: 1.5) {
+                                Text("聯繫客服")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.95))
+                                Text("遇到問題或有建議，直接找我們")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+
+                            Spacer(minLength: 6)
+
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Brand.mint.opacity(0.22), lineWidth: 0.8)
+                        )
+                    }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 18)
 
                     Button {
