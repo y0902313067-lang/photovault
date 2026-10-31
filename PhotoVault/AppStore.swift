@@ -424,8 +424,15 @@ final class AppStore: ObservableObject {
             self.token = token
 
             // 1) 建立 / 更新用户资料
-            let pid = try await ensureProfile(token: token)
-            profileID = pid
+            //    續傳時資料夾已经存在，直接用本機記下的 id：
+            //    密碼不會存在本機，再走一次「查帳號」會因為比對不到雜湊而誤判成「帳號已被使用」
+            let pid: String
+            if let existing = profileID, !existing.isEmpty {
+                pid = existing
+            } else {
+                pid = try await ensureProfile(token: token)
+                profileID = pid
+            }
             // 立刻落盘：哪怕下一秒 App 被滑掉，也已经算注册完成，下次直接接着传
             setPending(true)
             persistSession(synced: false)
