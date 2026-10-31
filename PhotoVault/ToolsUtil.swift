@@ -263,7 +263,7 @@ struct TimeToolsView: View {
                         Text(dayDiffText(now, zone: tz))
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(dayDiffColor(now, zone: tz))
-                            .frame(width: 32, alignment: .trailing)
+                            .frame(width: 38, alignment: .trailing)
                     }
                 }
                 .padding(.horizontal, 13)
@@ -276,26 +276,37 @@ struct TimeToolsView: View {
         }
     }
 
+    /// 目標城市當地日期 與 本地日期 相差幾天。跨月、跨年都算正確。
+    /// 做法：把兩邊的「年月日」各自取出來，都放進同一個 UTC 日曆裡再相減，
+    /// 這樣就只比日期、不受「日號」本身大小的影響（11/1 對 10/31 是 -1，不是 +30）。
+    private func dayOffset(_ date: Date, zone: TimeZone) -> Int {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+
+        var other = Calendar(identifier: .gregorian)
+        other.timeZone = zone
+        let a = other.dateComponents([.year, .month, .day], from: date)
+
+        var mine = Calendar(identifier: .gregorian)
+        mine.timeZone = TimeZone.current
+        let b = mine.dateComponents([.year, .month, .day], from: date)
+
+        guard let dOther = utc.date(from: a), let dMine = utc.date(from: b) else { return 0 }
+        return utc.dateComponents([.day], from: dMine, to: dOther).day ?? 0
+    }
+
     private func dayDiffText(_ date: Date, zone: TimeZone) -> String {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = zone
-        let d = cal.component(.day, from: date)
-        var local = Calendar(identifier: .gregorian)
-        local.timeZone = TimeZone.current
-        let l = local.component(.day, from: date)
-        let diff = d - l
-        if diff == 0 { return "同日" }
-        return diff > 0 ? "+\(diff)日" : "\(diff)日"
+        let diff = dayOffset(date, zone: zone)
+        switch diff {
+        case 0: return "同日"
+        case 1: return "明日"
+        case -1: return "昨日"
+        default: return diff > 0 ? "+\(diff)日" : "−\(abs(diff))日"
+        }
     }
 
     private func dayDiffColor(_ date: Date, zone: TimeZone) -> Color {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = zone
-        let d = cal.component(.day, from: date)
-        var local = Calendar(identifier: .gregorian)
-        local.timeZone = TimeZone.current
-        let l = local.component(.day, from: date)
-        return d == l ? Color.white.opacity(0.22) : TT.amber.opacity(0.8)
+        dayOffset(date, zone: zone) == 0 ? Color.white.opacity(0.22) : TT.amber.opacity(0.8)
     }
 
     private func parseStamp() -> Date? {
