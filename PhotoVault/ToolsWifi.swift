@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Foundation
+import Network
 import NetworkExtension
 import SystemConfiguration.CaptiveNetwork
 import CoreLocation
@@ -16,6 +17,14 @@ struct WifiSnapshot {
     var checkedAt: Date? = nil
 }
 
+/// 連線品質：對外連通、是否需要先登入（Captive Portal）、往返延遲
+enum PortalState {
+    case unknown      // 還沒測
+    case ok           // 連通正常
+    case portal       // 需要先登入的公共網路（飯店／機場／咖啡廳）
+    case offline      // 連不出去
+}
+
 // MARK: - 模型
 
 final class WifiModel: ObservableObject {
@@ -24,9 +33,25 @@ final class WifiModel: ObservableObject {
     @Published var notifOn = UserDefaults.standard.bool(forKey: "md.wifi.notify")
     @Published var toast: String? = nil
     @Published var locationAllowed = false
+    @Published var onWifi = false
+    @Published var latencyMs: Int? = nil
+    @Published var portal: PortalState = .unknown
+    @Published var probeRunning = false
 
     private var notifiedSSID: String? = nil
     private var locManager: CLLocationManager?
+    private let pathMonitor = NWPathMonitor()
+
+    init() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.onWifi = (path.status == .satisfied && path.usesInterfaceType(.wifi))
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "md.wifi.path"))
+    }
+
+    deinit { pathMonitor.cancel() }
 
     var borderColor: Color {
         guard let secure = snap.secure else { return TT.amber }
@@ -34,9 +59,33 @@ final class WifiModel: ObservableObject {
     }
 
     var stateText: String {
-        guard snap.ssid != nil else { return "讀不到網路名稱" }
+        if snap.ssid == nil {
+            return onWifi ? "已連線，但讀不到名稱（需定位權限）" : "未連上 Wi-Fi"
+        }
         guard let secure = snap.secure else { return "加密狀態未知，可手動標記" }
         return secure ? "已加密（需密碼）" : "開放網路（免密碼）"
+    }
+
+    var networkTypeText: String { onWifi ? "Wi-Fi" : "行動網路" }
+
+    var latencyText: String {
+        guard let ms = latencyMs else { return "—" }
+        return "\(ms) ms"
+    }
+
+    var portalText: String {
+        switch portal {
+        case .unknown: return "—"
+        case .ok:      return "連線正常"
+        case .portal:  return "需要先登入（公共網路）"
+        case .offline: return "連不出去"
+        }
+    }
+
+    /// 沒連 Wi-Fi 或讀不到名稱時，一鍵跳到系統設定
+    func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// 系統沒給加密狀態時，讓使用者自己標一次，之後這台機器就記住了
@@ -82,6 +131,33 @@ final class WifiModel: ObservableObject {
             self.scanning = false
             self.evaluateNotification()
         }
+        probeConnectivity()
+    }
+
+    /// 探一下這個網路通不通、要不要先登入、往返多久
+    func probeConnectivity() {
+        guard let url = URL(string: "https://captive.apple.com/hotspot-detect.html") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 8
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        probeRunning = true
+        let t0 = Date()
+
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            DispatchQueue.main.async {
+                self.probeRunning = false
+                self.latencyMs = ms
+                if err != nil {
+                    self.portal = .offline
+                } else if body.contains("Success") {
+                    self.portal = .ok
+                } else {
+                    self.portal = .portal
+                }
+            }
+        }.resume()
     }
 
     private func fetchSnapshot(_ done: @escaping (WifiSnapshot) -> Void) {
@@ -177,13 +253,19 @@ struct WifiCheckView: View {
     @State private var timerOn = false
 
     var body: some View {
-        TTScreen(title: "蹭網檢測",
-                 subtitle: "WIFI CHECKER",
+        TTScreen(title: "Wi-Fi 安全檢測",
+                 subtitle: "WI-FI SECURITY",
                  badge: model.snap.secure == false ? "OPEN" : (model.snap.secure == true ? "SECURE" : nil),
                  badgeOn: model.snap.secure == false,
                  accent: TT.rose) {
 
             currentCard
+
+            if model.snap.ssid == nil {
+                wifiGuide
+            }
+
+            connectionCard
 
             notifyCard
 
@@ -239,7 +321,7 @@ struct WifiCheckView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.snap.ssid ?? "未連上 Wi-Fi")
+                    Text(model.snap.ssid ?? (model.onWifi ? "已連上 Wi-Fi" : "未連上 Wi-Fi"))
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -262,7 +344,9 @@ struct WifiCheckView: View {
                     .foregroundStyle(TT.rose.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
             } else if model.snap.ssid == nil {
-                Text("讀不到網路名稱：iOS 需要「定位」權限才肯把 Wi-Fi 名稱給 App。下面點一下開啟就可以。")
+                Text(model.onWifi
+                     ? "已連上 Wi-Fi，但 iOS 需要「定位」權限才肯把網路名稱給 App。下面點一下開啟就可以。"
+                     : "手機目前沒有連 Wi-Fi（可能正在用行動網路）。這一頁只檢測你當下連著的那一個網路，先連上 Wi-Fi 再回來看。")
                     .font(.system(size: 11.5))
                     .foregroundStyle(TT.amber.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
@@ -314,6 +398,139 @@ struct WifiCheckView: View {
         .shadow(color: model.borderColor.opacity(0.18), radius: 18, y: 8)
     }
 
+    // MARK: 未連線引導
+
+    private var wifiGuide: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(TT.amber)
+                Text(model.onWifi ? "讀不到網路名稱" : "請先連上 Wi-Fi")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                Spacer(minLength: 0)
+            }
+
+            Text(model.onWifi
+                 ? "Wi-Fi 已經連上，但系統還沒把名稱給 App。多半是定位權限沒開，去設定裡打開就好。"
+                 : "這一頁測的是你目前連著的那個網路。先連上 Wi-Fi 再回來，就會顯示名稱、加密方式跟連線品質。")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                model.openSystemSettings()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "gear")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("前往設定")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(TT.amber)
+                .padding(.horizontal, 16)
+                .frame(height: 42)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(TT.amber.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(TT.amber.opacity(0.35), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(TT.amber.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(TT.amber.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    // MARK: 連線品質
+
+    private var connectionCard: some View {
+        TTPanel(accent: TT.mint) {
+            VStack(alignment: .leading, spacing: 12) {
+                TTSectionTitle(text: "連線品質", accent: TT.mint)
+
+                HStack(spacing: 9) {
+                    metric("類型", model.networkTypeText, TT.mint)
+                    metric("延遲", model.probeRunning ? "測量中…" : model.latencyText, latencyColor)
+                    metric("連通", model.portalText, portalColor)
+                }
+
+                portalHint
+            }
+        }
+    }
+
+    private func metric(_ title: String, _ value: String, _ accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.35))
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private var latencyColor: Color {
+        guard let ms = model.latencyMs else { return .white.opacity(0.5) }
+        if ms < 100 { return TT.mint }
+        if ms < 300 { return TT.amber }
+        return TT.rose
+    }
+
+    private var portalColor: Color {
+        switch model.portal {
+        case .ok:      return TT.mint
+        case .portal:  return TT.amber
+        case .offline: return TT.rose
+        case .unknown: return .white.opacity(0.5)
+        }
+    }
+
+    @ViewBuilder
+    private var portalHint: some View {
+        switch model.portal {
+        case .portal:
+            hintText("這個網路還沒放行。連上後通常要先開瀏覽器登入或勾同意（飯店、機場、咖啡廳常見），登入前別輸入重要的密碼。", TT.amber)
+        case .offline:
+            hintText("連不出去。路由器可能沒接到網路，或是訊號太弱，換個位置或重開 Wi-Fi 再測。", TT.rose)
+        case .ok:
+            if model.snap.secure == false {
+                hintText("連線正常，但這是開放網路。到「設定 → Wi-Fi → 這個網路」把「自動加入」關掉，免得手機自動連上同名假熱點。", TT.rose)
+            }
+        case .unknown:
+            EmptyView()
+        }
+    }
+
+    private func hintText(_ text: String, _ accent: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11.5))
+            .foregroundStyle(accent.opacity(0.85))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     // MARK: 通知
 
     private var notifyCard: some View {
@@ -363,6 +580,12 @@ struct WifiCheckView: View {
                 TTKeyRow(key: "路由器 BSSID", value: mask(model.snap.bssid), accent: TT.blue, mono: true)
                 Divider().background(Color.white.opacity(0.06))
                 TTKeyRow(key: "本機 IP", value: model.snap.ip ?? "—", accent: TT.blue, mono: true)
+                Divider().background(Color.white.opacity(0.06))
+                TTKeyRow(key: "網路類型", value: model.networkTypeText, accent: TT.blue)
+                Divider().background(Color.white.opacity(0.06))
+                TTKeyRow(key: "連通狀態", value: model.portalText, accent: TT.blue)
+                Divider().background(Color.white.opacity(0.06))
+                TTKeyRow(key: "往返延遲", value: model.latencyText, accent: TT.blue, mono: true)
                 Divider().background(Color.white.opacity(0.06))
                 TTKeyRow(key: "最後檢測", value: timeText, accent: TT.blue)
             }
@@ -418,8 +641,8 @@ struct WifiCheckView: View {
     private var limitsCard: some View {
         TTPanel(accent: TT.violet) {
             VStack(alignment: .leading, spacing: 10) {
-                TTSectionTitle(text: "為什麼沒有周邊熱點列表", accent: TT.violet)
-                Text("iOS 不開放掃描周邊 Wi-Fi 的介面，任何 App 都拿不到「附近有哪些熱點」。這一頁能拿到的是你目前連著的這一個：名稱、路由器編號與本機 IP。\n\n加密狀態由系統決定要不要給；遇到顯示「未知」時，卡片上可以用「要密碼／免密碼」手動標記一次，這台手機之後就會記住，通知也會照這個標記判斷。")
+                TTSectionTitle(text: "這個頁面測什麼", accent: TT.violet)
+                Text("只測你目前連著的那一個網路：名稱、有沒有加密、連不連得出去、要不要先登入、往返延遲。\n\n兩件 iOS 不給的事先講清楚，免得誤會：\n• 不能列出附近有哪些熱點。系統沒有這個介面，任何 App 都一樣。\n• 不能細分 WPA2 / WPA3 / WEP。系統只回報「有沒有加密」；顯示「未知」時，可以用卡片上的「要密碼／免密碼」手動標記一次，這台手機之後會記住。")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.45))
                     .fixedSize(horizontal: false, vertical: true)
