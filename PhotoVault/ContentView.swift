@@ -26,6 +26,7 @@ struct Backdrop: View {
 
 struct RootView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -39,6 +40,9 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.35), value: store.stage)
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { store.resumeIfNeeded() }
+        }
     }
 }
 
@@ -350,18 +354,17 @@ struct UploadingView: View {
     }
 
     var body: some View {
-        ZStack {
-            blobs
-            VStack(spacing: 0) {
-                brandHeader
-                Spacer(minLength: 14)
-                ringView
-                statusPill.padding(.top, 6)
-                stepBar.padding(.top, 22)
-                Spacer()
-                footNote
-            }
+        VStack(spacing: 0) {
+            brandHeader
+            Spacer(minLength: 14)
+            ringView
+            statusPill.padding(.top, 6)
+            stepBar.padding(.top, 22)
+            Spacer()
+            footNote
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(blobs.ignoresSafeArea())
         .onAppear(perform: startAnimations)
     }
 
@@ -386,8 +389,9 @@ struct UploadingView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 6)
+        .padding(.leading, 26)
+        .padding(.trailing, 20)
+        .padding(.top, 10)
     }
 
     private func startAnimations() {
@@ -532,13 +536,52 @@ struct UploadingView: View {
     }
 
     private var footNote: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "lock.fill").font(.system(size: 9))
-            Text("請保持 App 在前台，不要鎖屏")
+        Group {
+            if store.syncStalled && !store.running {
+                VStack(spacing: 14) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.arrow.circlepath").font(.system(size: 10))
+                        Text("同步還沒完成，下次打開會自動接著傳")
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.white.opacity(0.5))
+
+                    HStack(spacing: 10) {
+                        Button {
+                            store.retrySync()
+                        } label: {
+                            Text("再試一次")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.92))
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 9)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+                        }
+                        Button {
+                            store.skipToHome()
+                        } label: {
+                            Text("先進入主頁")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 9)
+                                .background(Capsule().fill(Color.white.opacity(0.06)))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                        }
+                    }
+                }
+                .padding(.bottom, 34)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 9))
+                    Text("中途離開也沒關係，下次打開會自動接著傳")
+                }
+                .font(.system(size: 11.5))
+                .foregroundColor(.white.opacity(0.26))
+                .padding(.bottom, 42)
+            }
         }
-        .font(.system(size: 11.5))
-        .foregroundColor(.white.opacity(0.26))
-        .padding(.bottom, 42)
     }
 }
 
@@ -633,7 +676,7 @@ struct ProfileView: View {
                         Divider().background(Color.white.opacity(0.08))
                         row("相簿權限", authText)
                         Divider().background(Color.white.opacity(0.08))
-                        row("同步狀態", store.errorText == nil ? "正常" : "有中斷")
+                        row("同步狀態", syncText)
                     }
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -698,6 +741,12 @@ struct ProfileView: View {
         case .denied, .restricted:  return "未允許"
         default:                    return "未設定"
         }
+    }
+
+    private var syncText: String {
+        if store.running { return "同步中…" }
+        if store.pendingSync { return "待續傳" }
+        return "正常"
     }
 
     private func row(_ k: String, _ v: String) -> some View {

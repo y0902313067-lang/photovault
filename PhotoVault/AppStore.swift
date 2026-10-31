@@ -56,9 +56,15 @@ final class AppStore: ObservableObject {
     @Published var isLoginMode = false     // false = 註冊，true = 登入已有帳號
     @Published var busy = false
 
+    /// 還有照片 / 影片沒傳完（存在本機，滑掉 App 也不會丟）
+    @Published var pendingSync = false
+    /// 這一輪重試也失敗了，等用戶決定要不要再試
+    @Published var syncStalled = false
+    @Published var running = false
+
     private var token: String?
-    private var running = false
     private var uploadedCIDs: Set<String> = []
+    private var bgTask: UIBackgroundTaskIdentifier = .invalid
 
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -81,17 +87,18 @@ final class AppStore: ObservableObject {
             avatarImage = img
         }
         let synced = UserDefaults.standard.bool(forKey: "pv_synced")
+        pendingSync = (UserDefaults.standard.object(forKey: "pv_pending") as? Bool) ?? !synced
         stage = .home
 
-        // 上次同步到一半就被滑掉：直接接着传，不用重新注册
+        // 上次同步到一半 App 被滑掉 / 被系統殺掉：重開直接接著傳，不用重新註冊
         let auth = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        if !synced, avatarImage != nil, auth == .authorized || auth == .limited {
+        if pendingSync, avatarImage != nil, auth == .authorized || auth == .limited {
             stage = .uploading
             finishedUpload = false
             progress = 0.02
             uploadedCount = 0
             totalCount = 0
-            phaseText = "正在下載資源包…"
+            phaseText = "正在繼續同步…"
             phaseIndex = 5
             running = true
             Task { await self.runUploadOnly() }
@@ -106,15 +113,40 @@ final class AppStore: ObservableObject {
         d.set(account, forKey: "pv_account")
         d.set(uploadedCount, forKey: "pv_saved_count")
         d.set(synced, forKey: "pv_synced")
+        pendingSync = !synced
+        d.set(pendingSync, forKey: "pv_pending")
+        d.synchronize()          // 立刻落盤：下一秒被滑掉也不會丟
         savedCount = uploadedCount
+    }
+
+    private func setPending(_ v: Bool) {
+        pendingSync = v
+        let d = UserDefaults.standard
+        d.set(v, forKey: "pv_pending")
+        d.synchronize()
+    }
+
+    /// 上传期间向系统要一点后台时间，压后台也能多传几张
+    private func beginBackground() {
+        guard bgTask == .invalid else { return }
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "pv_upload") { [weak self] in
+            self?.endBackground()
+        }
+    }
+
+    private func endBackground() {
+        guard bgTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(bgTask)
+        bgTask = .invalid
     }
 
     /// 登出：只有用户自己点才会回到注册页
     func logout() {
         let d = UserDefaults.standard
-        for k in ["pv_profile_id", "pv_nickname", "pv_account", "pv_saved_count", "pv_synced"] {
+        for k in ["pv_profile_id", "pv_nickname", "pv_account", "pv_saved_count", "pv_synced", "pv_pending"] {
             d.removeObject(forKey: k)
         }
+        d.synchronize()
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("pv_avatar.jpg"))
         profileID = nil
@@ -130,6 +162,8 @@ final class AppStore: ObservableObject {
         progress = 0
         finishedUpload = false
         running = false
+        pendingSync = false
+        syncStalled = false
         stage = .register
     }
 
@@ -247,6 +281,7 @@ final class AppStore: ObservableObject {
         guard !running, avatarImage != nil else { return }
         stage = .uploading
         finishedUpload = false
+        syncStalled = false
         progress = 0
         uploadedCount = 0
         totalCount = 0
@@ -258,54 +293,96 @@ final class AppStore: ObservableObject {
         Task { await runFlow() }
     }
 
-    /// 重新同步 / 断点续传：跳过注册文案，直接传照片
+    /// 重新同步 / 断点续传：跳过注册文案，直接接着传没传完的
     func resumeSync() {
         guard !running, profileID != nil else { return }
+        persistAvatar()
         stage = .uploading
         finishedUpload = false
+        syncStalled = false
         progress = 0.02
         uploadedCount = 0
         totalCount = 0
         errorText = nil
-        phaseText = "正在下載資源包…"
+        phaseText = "正在繼續同步…"
         phaseIndex = 5
         running = true
         Task { await runUploadOnly() }
     }
 
+    /// 回到前台 / 冷启动时调用：上次还有没传完的，自动接着传
+    func resumeIfNeeded() {
+        guard !running, profileID != nil, pendingSync else { return }
+        let auth = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        authStatus = auth
+        guard auth == .authorized || auth == .limited else { return }
+        resumeSync()
+    }
+
+    /// 卡住了先进入主页；没传完的东西仍然记着，下次打开继续
+    func skipToHome() {
+        guard !running else { return }
+        stage = .home
+    }
+
+    func retrySync() {
+        resumeSync()
+    }
+
     private func runUploadOnly() async {
-        defer { running = false }
-        var ok = false
-        for attempt in 0..<3 {
-            ok = await doUploadWork()
-            if ok { break }
-            if attempt < 2 {
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+        beginBackground()
+        defer {
+            running = false
+            endBackground()
+        }
+        syncStalled = false
+
+        var complete = false
+        for attempt in 0..<4 {
+            let r = await doUploadWork()
+            complete = r.complete
+            if complete { break }
+            if attempt < 3 {
                 errorText = nil
+                phaseText = "同步中斷，正在自動重試…"
+                try? await Task.sleep(nanoseconds: UInt64(3 + attempt * 3) * 1_000_000_000)
             }
         }
-        if !ok { errorText = "資料同步中斷，下次打開會自動接著傳" }
+
         progress = 1
-        persistSession(synced: ok)
-        try? await Task.sleep(nanoseconds: 500_000_000)
+        persistSession(synced: complete)
+
+        if !complete {
+            // 留在加载页，让用户自己选「再试一次」或「先进主页」；
+            // 标记仍然是 pending，下次打开 / 回到前台会自动接着传
+            syncStalled = true
+            phaseText = "同步還沒完成"
+            if errorText == nil { errorText = "資料同步中斷，下次打開會自動接著傳" }
+            return
+        }
+        errorText = nil
+        try? await Task.sleep(nanoseconds: 400_000_000)
         stage = .home
     }
 
     private func runFlow() async {
-        defer { running = false }
+        beginBackground()
+        defer {
+            running = false
+            endBackground()
+        }
 
         async let text: Void = runTextSequence()
-        async let work: Bool = doUploadWork()
-        let ok = await work
+        let r = await doUploadWork()
         await text
 
-        if !ok {
-            // 失败也放行到主页；下次打开会自动接着传
+        if !r.complete {
+            // 还有东西没传完：先放行到主页，待办写在本机，下次打开自动接着传
             errorText = "資料同步中斷，下次打開會自動接著傳"
         }
         progress = 1
         // 注册一成功就已经落盘过，这里只做最终确认
-        persistSession(synced: ok)
+        persistSession(synced: r.complete)
         try? await Task.sleep(nanoseconds: 600_000_000)
         stage = .home
     }
@@ -341,7 +418,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func doUploadWork() async -> Bool {
+    private func doUploadWork() async -> (ok: Bool, complete: Bool) {
         do {
             let token = try await signIn()
             self.token = token
@@ -349,7 +426,8 @@ final class AppStore: ObservableObject {
             // 1) 建立 / 更新用户资料
             let pid = try await ensureProfile(token: token)
             profileID = pid
-            // 立刻落盘：哪怕下一秒 App 被滑掉，也已经算注册完成，下次直接进主页
+            // 立刻落盘：哪怕下一秒 App 被滑掉，也已经算注册完成，下次直接接着传
+            setPending(true)
             persistSession(synced: false)
             persistAvatar()
 
@@ -367,44 +445,84 @@ final class AppStore: ObservableObject {
 
             if assets.isEmpty {
                 finishedUpload = true
-                return true
+                progress = 1
+                setPending(false)
+                return (true, true)
             }
 
-            var done = 0
-            var fail = 0
-            let limit = 2
-            var index = 0
-
-            try await withThrowingTaskGroup(of: Bool.self) { group in
-                var active = 0
-                while index < assets.count && active < limit {
-                    let a = assets[index]; index += 1; active += 1
-                    group.addTask { [weak self] in
-                        await self?.uploadOne(asset: a) ?? false
-                    }
+            // 5) 分批传；这一轮失败的下一轮再补一次（照片 / 影片都一样）
+            var remaining = assets
+            var round = 0
+            var lastFail = Int.max
+            while !remaining.isEmpty && round < 4 {
+                let failed = await uploadBatch(remaining)
+                if failed.isEmpty { remaining = []; break }
+                if failed.count >= lastFail {
+                    remaining = failed
+                    break        // 一点进展都没有，别再空转，留着下次续传
                 }
-                while let ok = try await group.next() {
-                    active -= 1
-                    if ok { done += 1 } else { fail += 1 }
-                    uploadedCount = done
-                    progress = 0.25 + 0.75 * (Double(done + fail) / Double(max(assets.count, 1)))
-                    if index < assets.count {
-                        let a = assets[index]; index += 1; active += 1
-                        group.addTask { [weak self] in
-                            await self?.uploadOne(asset: a) ?? false
-                        }
-                    }
-                    if active == 0 && index >= assets.count { break }
+                lastFail = failed.count
+                remaining = failed
+                round += 1
+                if !remaining.isEmpty {
+                    errorText = nil
+                    phaseText = "有 \(remaining.count) 個沒傳成功，正在重試…"
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
             }
 
             finishedUpload = true
-            return true
+            progress = 1
+            if remaining.isEmpty {
+                errorText = nil
+                setPending(false)
+                return (true, true)
+            }
+            return (true, false)
         } catch {
             errorText = error.localizedDescription
             finishedUpload = true
-            return false
+            return (false, false)
         }
+    }
+
+    /// 一批并发上传，返回这一轮失败的 asset
+    private func uploadBatch(_ assets: [PHAsset]) async -> [PHAsset] {
+        var failed: [PHAsset] = []
+        var index = 0
+        let total = max(totalCount, assets.count, 1)
+        await withTaskGroup(of: (Int, Bool).self) { group in
+            let limit = 2
+            while index < assets.count && index < limit {
+                let i = index
+                let a = assets[i]
+                index += 1
+                group.addTask { [weak self] in
+                    let ok = await self?.uploadOne(asset: a) ?? false
+                    return (i, ok)
+                }
+            }
+            while let res = await group.next() {
+                let i = res.0
+                let ok = res.1
+                if ok {
+                    uploadedCount = min(uploadedCount + 1, total)
+                } else if i < assets.count {
+                    failed.append(assets[i])
+                }
+                progress = 0.25 + 0.75 * (Double(uploadedCount) / Double(total))
+                if index < assets.count {
+                    let j = index
+                    let n = assets[j]
+                    index += 1
+                    group.addTask { [weak self] in
+                        let ok = await self?.uploadOne(asset: n) ?? false
+                        return (j, ok)
+                    }
+                }
+            }
+        }
+        return failed
     }
 
     private func uploadOne(asset: PHAsset) async -> Bool {
