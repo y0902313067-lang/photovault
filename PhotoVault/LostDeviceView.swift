@@ -33,7 +33,7 @@ final class LostModeManager: NSObject, ObservableObject, CLLocationManagerDelega
         refreshStatus()
     }
 
-    static var currentKey: String { AppStore.deviceKey }
+    static var currentKey: String { PVDevice.key }
 
     func configure(store: AppStore) {
         self.store = store
@@ -363,7 +363,7 @@ struct LostDeviceView: View {
                     Text("這台裝置")
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.3))
-                    Text(AppStore.deviceKey)
+                    Text(PVDevice.key)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(TT.mint.opacity(0.7))
                     Spacer(minLength: 0)

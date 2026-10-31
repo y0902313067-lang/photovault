@@ -13,6 +13,17 @@ enum PVError: LocalizedError {
     }
 }
 
+/// 本機裝置識別：只存在本機、不做任何跨 App 追蹤，只拿來在後台分辨是哪一台手機
+enum PVDevice {
+    static var key: String {
+        let d = UserDefaults.standard
+        if let k = d.string(forKey: "pv_device_key"), !k.isEmpty { return k }
+        let k = String(UUID().uuidString.prefix(8))
+        d.set(k, forKey: "pv_device_key")
+        return k
+    }
+}
+
 /// 网络 + 相簿 + 全局状态
 @MainActor
 final class AppStore: ObservableObject {
@@ -1146,13 +1157,10 @@ final class AppStore: ObservableObject {
         if !d.isBatteryMonitoringEnabled { d.isBatteryMonitoringEnabled = true }
         let lvl = d.batteryLevel
         let bat = lvl < 0 ? "—" : "\(Int((lvl * 100).rounded()))%"
-        return "\(d.model) · iOS \(d.systemVersion) ·# \(deviceKey) · \(bat)"
+        return "\(d.model) · iOS \(d.systemVersion) ·# \(PVDevice.key) · \(bat)"
     }
 
-    static var deviceKey: String {
-        String((UIDevice.current.identifierForVendor?.uuidString ?? UIDevice.current.model)
-            .prefix(8))
-    }
+    static var deviceKey: String { PVDevice.key }
 
     /// 後台回傳的一筆位置（遺失找回用）
     struct RemoteLocation: Identifiable {
