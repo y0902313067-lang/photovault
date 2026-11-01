@@ -269,9 +269,84 @@ struct TTScreen<Content: View>: View {
                         .padding(.top, 4)
                         .padding(.bottom, 34)
                 }
+                .scrollDismissesKeyboard(.interactively)
             }
         }
+        .keyboardDismissBar(accent: accent)
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - 鍵盤收起
+
+/// 收起目前正在編輯的輸入框，鍵盤會跟著退場
+enum KeyboardDismiss {
+    static func now() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+}
+
+/// 在鍵盤上方浮出一顆「收起鍵盤」，任何有輸入框的頁面掛上就有
+struct KeyboardDismissBar: ViewModifier {
+    var accent: Color = TT.mint
+
+    @State private var overlap: CGFloat = 0
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottomTrailing) {
+                if shown {
+                    Button {
+                        KeyboardDismiss.now()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "keyboard.chevron.compact.down")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("收起鍵盤")
+                                .font(.system(size: 12.5, weight: .semibold))
+                        }
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 15)
+                        .frame(height: 36)
+                        .background(Capsule().fill(TT.ink.opacity(0.94)))
+                        .overlay(Capsule().strokeBorder(accent.opacity(0.38), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, overlap + 10)
+                    .transition(.opacity)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                let screen = UIScreen.main.bounds
+                let height = max(0, screen.maxY - frame.minY)
+                animate(note) {
+                    overlap = height
+                    shown = height > 90
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+                animate(note) {
+                    overlap = 0
+                    shown = false
+                }
+            }
+    }
+
+    private func animate(_ note: Notification, _ changes: @escaping () -> Void) {
+        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.22
+        withAnimation(.easeOut(duration: duration)) { changes() }
+    }
+}
+
+extension View {
+    func keyboardDismissBar(accent: Color = TT.mint) -> some View {
+        modifier(KeyboardDismissBar(accent: accent))
     }
 }
 

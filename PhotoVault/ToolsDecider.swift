@@ -48,15 +48,21 @@ struct DecisionEngineView: View {
             .filter { !$0.isEmpty }
     }
 
+    /// 只有前三種模式會讀上面那塊選項；骰子與數字自己填參數，用不到
+    private var usesOptions: Bool { mode <= 2 }
+
     var body: some View {
         TTScreen(title: "隨機決策",
                  subtitle: "DECISION ENGINE",
-                 badge: "\(options.count) 選項",
+                 badge: usesOptions ? "\(options.count) 選項" : nil,
                  badgeOn: options.count > 0,
                  accent: TT.violet) {
 
             modeBlock
-            optionsBlock
+
+            if usesOptions {
+                optionsBlock
+            }
 
             switch mode {
             case 0: oneBlock
@@ -66,7 +72,9 @@ struct DecisionEngineView: View {
             default: numberBlock
             }
 
-            saveBlock
+            if usesOptions {
+                saveBlock
+            }
         }
         .onAppear(perform: loadSets)
     }
@@ -147,12 +155,6 @@ struct DecisionEngineView: View {
                             .padding(.top, 13)
                             .allowsHitTesting(false)
                     }
-                }
-
-                if mode == 4 {
-                    Text("這個模式不吃上面的選項，直接填範圍就好")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.24))
                 }
             }
         }

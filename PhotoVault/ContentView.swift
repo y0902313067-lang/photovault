@@ -45,6 +45,7 @@ struct RootView: View {
             case .home:      MainTabView()
             }
         }
+        .keyboardDismissBar()
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.35), value: store.stage)
         .onChange(of: scenePhase) { phase in
