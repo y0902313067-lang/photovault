@@ -162,12 +162,10 @@ struct HomeView: View {
         ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
                   tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab, .password]),
         ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
-                  tools: [.level, .compass, .magnet, .gravity, .barometer, .decibel,
-                          .motionSpeed]),
+                  tools: [.motionSpeed, .level, .compass, .magnet, .gravity, .barometer,
+                          .decibel, .recorder]),
         ToolGroup(name: "裝置與位置", en: "DEVICE & POSITION", accent: TT.blue,
                   tools: [.device, .location, .lostDevice]),
-        ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
-                  tools: [.ocr, .qrscan, .docScan, .idPhoto, .recorder]),
         ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
                   tools: [.units, .baseConv, .time])
     ]
@@ -237,7 +235,7 @@ struct HomeView: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.3))
                 }
-                Text("測速、感測器、影像辨識與小算盤，全部在手機本機完成")
+                Text("網路安全、測速、感測器與小算盤，全部在手機本機完成")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.32))
                     .padding(.top, 1)

@@ -107,6 +107,8 @@ struct MoreToolsView: View {
     @State private var appeared = false
 
     private let groups: [ToolGroup] = [
+        ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
+                  tools: [.ocr, .qrscan, .docScan, .idPhoto]),
         ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
                   tools: [.qrStudio, .qrgen, .decider])
     ]
@@ -165,7 +167,7 @@ struct MoreToolsView: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.3))
                 }
-                Text("新功能從這裡開始，一個一個加上來")
+                Text("影像處理與產生工具，掃描、辨識、生碼都在這裡")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.32))
                     .padding(.top, 1)
