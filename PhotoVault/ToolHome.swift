@@ -218,12 +218,12 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 10) {
                     MintDragonMark(size: 44)
-                    Text("薄荷工具箱")
+                    Text("源孑工具箱")
                         .font(.system(size: 25, weight: .bold))
                         .foregroundStyle(.white)
                 }
                 HStack(spacing: 7) {
-                    Text("MINT DRAGON TOOLKIT")
+                    Text("YUANJIE TOOLKIT")
                         .font(.system(size: 9.5, weight: .bold))
                         .tracking(2.4)
                         .foregroundStyle(TT.mint.opacity(0.7))
@@ -292,7 +292,7 @@ struct HomeView: View {
                     .font(.system(size: 10))
             }
             .foregroundStyle(.white.opacity(0.22))
-            Text("MINT DRAGON TECHNOLOGY · v1.0")
+            Text("YUANJIE TECHNOLOGY · v1.0")
                 .font(.system(size: 8.5, weight: .bold))
                 .tracking(1.8)
                 .foregroundStyle(.white.opacity(0.13))

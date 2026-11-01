@@ -30,7 +30,7 @@ struct MintTabBar: View {
     @Binding var selection: Int
 
     private let items: [(icon: String, title: String)] = [
-        ("square.grid.2x2.fill", "薄荷工具箱"),
+        ("square.grid.2x2.fill", "源孑工具箱"),
         ("square.stack.fill", "更多工具"),
         ("person.fill", "我的")
     ]
@@ -231,7 +231,7 @@ struct MoreToolsView: View {
                     .font(.system(size: 10))
             }
             .foregroundStyle(.white.opacity(0.22))
-            Text("MINT DRAGON TECHNOLOGY · v1.0")
+            Text("YUANJIE TECHNOLOGY · v1.0")
                 .font(.system(size: 8.5, weight: .bold))
                 .tracking(1.8)
                 .foregroundStyle(.white.opacity(0.13))

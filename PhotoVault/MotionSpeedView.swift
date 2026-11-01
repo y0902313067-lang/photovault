@@ -734,7 +734,7 @@ struct MotionSpeedView: View {
                 Text("需要定位權限")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
-                Text("測速靠 GPS 計算速度與距離，到「設定 → 薄荷龍科技 → 位置」選「使用 App 期間」即可")
+                Text("測速靠 GPS 計算速度與距離，到「設定 → 源孑科技 → 位置」選「使用 App 期間」即可")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.42))
                     .multilineTextAlignment(.center)

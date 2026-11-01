@@ -416,7 +416,7 @@ struct QRStudioView: View {
                     fieldLabel("電子郵件")
                     plainField("hello@example.com", text: $contactEmail, keyboard: .emailAddress)
                     fieldLabel("公司／組織（選填）")
-                    plainField("薄荷龍科技", text: $contactOrg)
+                    plainField("源孑科技", text: $contactOrg)
                 case .wifi:
                     fieldLabel("網路名稱 SSID")
                     plainField("MyWiFi", text: $wifiSSID)
