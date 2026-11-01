@@ -8,7 +8,6 @@ enum ToolRoute: String, Identifiable, CaseIterable {
     case device, location, motionSpeed, lostDevice
     case ocr, qrgen, units, time
     case wifiCheck, docScan, idPhoto, recorder
-    case translate, storage
 
     var id: String { rawValue }
 
@@ -36,8 +35,6 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "文件掃描"
         case .idPhoto:   return "證件照製作"
         case .recorder:  return "錄音機"
-        case .translate: return "文字翻譯"
-        case .storage:   return "儲存空間"
         }
     }
 
@@ -65,8 +62,6 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "DOC SCANNER"
         case .idPhoto:   return "ID PHOTO"
         case .recorder:  return "VOICE RECORDER"
-        case .translate: return "TRANSLATOR"
-        case .storage:   return "STORAGE ANALYZER"
         }
     }
 
@@ -94,8 +89,6 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "doc.viewfinder"
         case .idPhoto:   return "person.crop.rectangle"
         case .recorder:  return "waveform"
-        case .translate: return "character.book.closed"
-        case .storage:   return "internaldrive"
         }
     }
 
@@ -123,8 +116,6 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return TT.blue
         case .idPhoto:   return TT.amber
         case .recorder:  return TT.violet
-        case .translate: return TT.mint
-        case .storage:   return TT.teal
         }
     }
 }
@@ -154,9 +145,7 @@ struct HomeView: View {
         ToolGroup(name: "資訊與位置", en: "DEVICE & POSITION", accent: TT.blue,
                   tools: [.device, .location, .motionSpeed, .lostDevice]),
         ToolGroup(name: "影像與計算", en: "IMAGING & MATH", accent: TT.amber,
-                  tools: [.ocr, .qrgen, .units, .time]),
-        ToolGroup(name: "語言與系統", en: "LANGUAGE & SYSTEM", accent: TT.lime,
-                  tools: [.translate, .storage])
+                  tools: [.ocr, .qrgen, .units, .time])
     ]
 
     private var localToolCount: Int {
@@ -322,8 +311,6 @@ struct ToolDestinationView: View {
         case .docScan:   DocScanView()
         case .idPhoto:   IDPhotoView()
         case .recorder:  RecorderView()
-        case .translate: TranslateView()
-        case .storage:   StorageAnalyzerView()
         }
     }
 }

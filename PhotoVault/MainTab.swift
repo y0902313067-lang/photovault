@@ -112,9 +112,7 @@ struct MoreToolsView: View {
         ToolGroup(name: "文件與證件", en: "DOCUMENT & ID", accent: TT.blue,
                   tools: [.docScan, .idPhoto]),
         ToolGroup(name: "聲音", en: "AUDIO", accent: TT.violet,
-                  tools: [.recorder]),
-        ToolGroup(name: "語言與系統", en: "LANGUAGE & SYSTEM", accent: TT.lime,
-                  tools: [.translate, .storage])
+                  tools: [.recorder])
     ]
 
     private var localToolCount: Int {

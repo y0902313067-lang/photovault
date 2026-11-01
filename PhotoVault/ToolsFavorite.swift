@@ -236,9 +236,9 @@ struct FavoritePickerView: View {
         ToolGroup(name: "資訊與位置", en: "DEVICE & POSITION", accent: TT.blue,
                   tools: [.device, .location, .motionSpeed, .lostDevice]),
         ToolGroup(name: "影像與計算", en: "IMAGING & MATH", accent: TT.amber,
-                  tools: [.ocr, .translate, .qrgen, .units, .time]),
+                  tools: [.ocr, .qrgen, .units, .time]),
         ToolGroup(name: "文件與聲音", en: "DOCUMENT & AUDIO", accent: TT.lime,
-                  tools: [.wifiCheck, .docScan, .idPhoto, .recorder, .storage])
+                  tools: [.wifiCheck, .docScan, .idPhoto, .recorder])
     ]
 
     var body: some View {
