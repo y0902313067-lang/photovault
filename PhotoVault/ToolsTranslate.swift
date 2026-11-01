@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import NaturalLanguage
 #if canImport(Translation)
 import Translation
 #endif
@@ -487,7 +488,19 @@ struct TranslatorCore: View {
         errorText = nil
         inputFocused = false
 
-        let sourceLanguage = source == .auto ? nil : Locale.Language(identifier: source.id)
+        var sourceLanguage: Locale.Language?
+        if source == .auto {
+            if let guessed = Self.detectLanguage(text) {
+                sourceLanguage = guessed.language
+                detected = guessed.matched
+            } else {
+                sourceLanguage = Locale.Language(identifier: "en")
+                detected = nil
+            }
+        } else {
+            sourceLanguage = Locale.Language(identifier: source.id)
+            detected = nil
+        }
         let targetLanguage = Locale.Language(identifier: target.id)
 
         isTranslating = true
@@ -520,27 +533,25 @@ struct TranslatorCore: View {
         defer { isTranslating = false }
 
         do {
-            var sourceLanguage = source == .auto ? nil : Locale.Language(identifier: source.id)
-            if sourceLanguage == nil {
-                let detectedLanguage = try await session.detectLanguage(for: text)
-                sourceLanguage = detectedLanguage
-                let key = detectedLanguage.languageCode?.identifier.lowercased() ?? ""
-                if !key.isEmpty,
-                   let matched = TranslateLanguage.all.first(where: {
-                       $0 != .auto && $0.id.lowercased().hasPrefix(key)
-                   }) {
-                    detected = matched
-                }
-            }
-            let response = try await session.translate(
-                text,
-                sourceLanguage: sourceLanguage,
-                targetLanguage: Locale.Language(identifier: target.id))
+            let response = try await session.translate(text)
             output = response.targetText
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
             errorText = friendly(error)
         }
+    }
+
+    static func detectLanguage(_ text: String) -> (language: Locale.Language, matched: TranslateLanguage?)? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        guard let dominant = recognizer.dominantLanguage else { return nil }
+        let raw = dominant.rawValue
+        let matched = TranslateLanguage.all.first { item in
+            item != .auto && item.id.lowercased() == raw.lowercased()
+        } ?? TranslateLanguage.all.first { item in
+            item != .auto && item.id.lowercased().hasPrefix(String(raw.lowercased().prefix(2)))
+        }
+        return (Locale.Language(identifier: raw), matched)
     }
 
     private func friendly(_ error: Error) -> String {
