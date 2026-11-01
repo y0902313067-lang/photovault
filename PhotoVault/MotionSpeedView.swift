@@ -476,8 +476,8 @@ struct MotionSpeedView: View {
     @StateObject private var model = MotionSpeedModel()
 
     var body: some View {
-        TTScreen(title: "薄荷測速",
-                 subtitle: "MINT SPEED TRACKER",
+        TTScreen(title: "源隼測速",
+                 subtitle: "YUAN SUN SPEED",
                  badge: model.running ? (model.paused ? "已暫停" : "記錄中") : "待機",
                  badgeOn: model.running && !model.paused,
                  accent: TT.amber) {
@@ -734,7 +734,7 @@ struct MotionSpeedView: View {
                 Text("需要定位權限")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
-                Text("測速靠 GPS 計算速度與距離，到「設定 → 源孑科技 → 位置」選「使用 App 期間」即可")
+                Text("測速靠 GPS 計算速度與距離，到「設定 → 源隼科技 → 位置」選「使用 App 期間」即可")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.42))
                     .multilineTextAlignment(.center)

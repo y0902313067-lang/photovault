@@ -411,7 +411,7 @@ struct DeviceInfoView: View {
 
     private var footer: some View {
         VStack(spacing: 3) {
-            Text("YUANJIE · DEVICE INSPECTOR")
+            Text("YUAN SUN · DEVICE INSPECTOR")
                 .font(.system(size: 8.5, weight: .medium))
                 .tracking(2.0)
                 .foregroundStyle(.white.opacity(0.16))

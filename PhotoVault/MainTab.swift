@@ -30,7 +30,7 @@ struct MintTabBar: View {
     @Binding var selection: Int
 
     private let items: [(icon: String, title: String)] = [
-        ("square.grid.2x2.fill", "源孑工具箱"),
+        ("square.grid.2x2.fill", "源隼工具箱"),
         ("square.stack.fill", "更多工具"),
         ("person.fill", "我的")
     ]
@@ -107,16 +107,8 @@ struct MoreToolsView: View {
     @State private var appeared = false
 
     private let groups: [ToolGroup] = [
-        ToolGroup(name: "開發與網路", en: "DEVELOPER", accent: TT.teal,
-                  tools: [.apiLab, .domainInfo]),
-        ToolGroup(name: "創作與資料", en: "CREATE & DATA", accent: TT.indigo,
-                  tools: [.qrStudio, .baseConv, .decider]),
-        ToolGroup(name: "網路安全", en: "NETWORK SAFETY", accent: TT.teal,
-                  tools: [.wifiCheck]),
-        ToolGroup(name: "文件與證件", en: "DOCUMENT & ID", accent: TT.blue,
-                  tools: [.docScan, .idPhoto]),
-        ToolGroup(name: "聲音", en: "AUDIO", accent: TT.violet,
-                  tools: [.recorder])
+        ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
+                  tools: [.qrStudio, .qrgen, .decider])
     ]
 
     private var localToolCount: Int {
@@ -231,7 +223,7 @@ struct MoreToolsView: View {
                     .font(.system(size: 10))
             }
             .foregroundStyle(.white.opacity(0.22))
-            Text("YUANJIE TECHNOLOGY · v1.0")
+            Text("YUAN SUN TECHNOLOGY · v1.0")
                 .font(.system(size: 8.5, weight: .bold))
                 .tracking(1.8)
                 .foregroundStyle(.white.opacity(0.13))

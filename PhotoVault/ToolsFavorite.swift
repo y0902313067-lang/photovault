@@ -229,20 +229,19 @@ struct FavoritePickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let groups: [ToolGroup] = [
-        ToolGroup(name: "網路與安全", en: "NETWORK & SECURITY", accent: TT.teal,
-                  tools: [.speed, .link, .qrscan, .password]),
-        ToolGroup(name: "感測器", en: "SENSORS", accent: TT.violet,
-                  tools: [.level, .compass, .magnet, .gravity, .barometer, .decibel]),
-        ToolGroup(name: "資訊與位置", en: "DEVICE & POSITION", accent: TT.blue,
-                  tools: [.device, .location, .motionSpeed, .lostDevice]),
-        ToolGroup(name: "影像與計算", en: "IMAGING & MATH", accent: TT.amber,
-                  tools: [.ocr, .qrgen, .units, .time]),
-        ToolGroup(name: "文件與聲音", en: "DOCUMENT & AUDIO", accent: TT.lime,
-                  tools: [.wifiCheck, .docScan, .idPhoto, .recorder]),
-        ToolGroup(name: "開發與網路", en: "DEVELOPER", accent: TT.teal,
-                  tools: [.apiLab, .domainInfo]),
-        ToolGroup(name: "創作與資料", en: "CREATE & DATA", accent: TT.indigo,
-                  tools: [.qrStudio, .baseConv, .decider])
+        ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
+                  tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab, .password]),
+        ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
+                  tools: [.level, .compass, .magnet, .gravity, .barometer, .decibel,
+                          .motionSpeed]),
+        ToolGroup(name: "裝置與位置", en: "DEVICE & POSITION", accent: TT.blue,
+                  tools: [.device, .location, .lostDevice]),
+        ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
+                  tools: [.ocr, .qrscan, .docScan, .idPhoto, .recorder]),
+        ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
+                  tools: [.units, .baseConv, .time]),
+        ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
+                  tools: [.qrStudio, .qrgen, .decider])
     ]
 
     var body: some View {

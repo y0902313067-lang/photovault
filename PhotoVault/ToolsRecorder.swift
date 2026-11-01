@@ -84,7 +84,7 @@ final class RecorderModel: NSObject, ObservableObject, AVAudioRecorderDelegate {
                 if ok {
                     self.start()
                 } else {
-                    self.message = "沒有麥克風權限，請到「設定 → 源孑科技」開啟"
+                    self.message = "沒有麥克風權限，請到「設定 → 源隼科技」開啟"
                 }
             }
         }

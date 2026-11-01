@@ -1,0 +1,6 @@
+art.zip
+art/
+chk/
+build/
+*.xcarchive
+*.ipa

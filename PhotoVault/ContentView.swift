@@ -107,7 +107,7 @@ struct TechGrid: View {
     }
 }
 
-/// 源孑標誌（發光卡片 + 旋轉軌道 + 掃光）
+/// 源隼標誌（發光卡片 + 旋轉軌道 + 掃光）
 struct MintDragonMark: View {
     var size: CGFloat = 86
     var asset: String = "MintDragon"
@@ -190,7 +190,7 @@ private struct TechHeader: View {
                     .fill(LinearGradient(colors: [.clear, Brand.mint.opacity(0.85)],
                                          startPoint: .leading, endPoint: .trailing))
                     .frame(width: 30, height: 1)
-                Text("YUANJIE TECHNOLOGY")
+                Text("YUAN SUN TECHNOLOGY")
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(2.2)
                     .foregroundStyle(Brand.mint.opacity(0.8))
@@ -523,11 +523,11 @@ struct SplashView: View {
                     .shadow(color: Brand.mint.opacity(0.35), radius: 28)
 
                 VStack(spacing: 5) {
-                    Text("源孑科技")
+                    Text("源隼科技")
                         .font(.system(size: 19, weight: .semibold))
                         .tracking(1.6)
                         .foregroundStyle(.white.opacity(0.95))
-                    Text("YUANJIE TECHNOLOGY")
+                    Text("YUAN SUN TECHNOLOGY")
                         .font(.system(size: 8.5, weight: .medium))
                         .tracking(2.1)
                         .foregroundStyle(Brand.mint.opacity(0.7))
