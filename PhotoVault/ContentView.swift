@@ -5,6 +5,7 @@ import UIKit
 import AVFoundation
 import UserNotifications
 import CoreLocation
+import CoreMotion
 import Speech
 
 // MARK: - 背景
@@ -575,7 +576,7 @@ enum PermState {
 }
 
 enum AppPerm: String, CaseIterable, Identifiable {
-    case notifications, locationWhenInUse, locationAlways, camera, microphone, speech, photosSave
+    case notifications, locationWhenInUse, locationAlways, camera, microphone, speech, photosSave, photosRead, motion
 
     var id: String { rawValue }
 
@@ -587,7 +588,9 @@ enum AppPerm: String, CaseIterable, Identifiable {
         case .camera:             return "相機"
         case .microphone:         return "麥克風"
         case .speech:             return "語音辨識"
-        case .photosSave:         return "照片（儲存到相簿）"
+        case .photosSave:         return "照片（存到相簿）"
+        case .photosRead:         return "照片（讀取相簿）"
+        case .motion:             return "動作與健身"
         }
     }
 
@@ -600,6 +603,8 @@ enum AppPerm: String, CaseIterable, Identifiable {
         case .microphone:        return "分貝計量測環境噪音、錄音機"
         case .speech:            return "把錄音檔轉成文字"
         case .photosSave:        return "證件照做完直接存進相簿"
+        case .photosRead:        return "從相簿選照片換頭像、掃描既有圖片做文字辨識"
+        case .motion:            return "分貝計與水平儀讀取動作資料，判斷手機是否被拿起"
         }
     }
 
@@ -612,6 +617,8 @@ enum AppPerm: String, CaseIterable, Identifiable {
         case .microphone:        return "mic"
         case .speech:            return "waveform"
         case .photosSave:        return "photo.on.rectangle"
+        case .photosRead:        return "photo.stack"
+        case .motion:            return "figure.walk.motion"
         }
     }
 }
@@ -624,6 +631,7 @@ struct ProfileView: View {
     @State private var showLogout = false
     @State private var perms: [AppPerm: PermState] = [:]
     @State private var locRequester: CLLocationManager?
+    @State private var motionRequester: CMMotionActivityManager?
     @State private var showAvatarPicker = false
     @State private var pickedAvatar: PhotosPickerItem?
     @Environment(\.scenePhase) private var profileScene
@@ -702,7 +710,7 @@ struct ProfileView: View {
                     )
                     .padding(.horizontal, 18)
 
-                    Text("點一下對應項目就能授權；已經拒絕過的會直接跳到系統設定裡改。")
+                    Text("點一下對應項目就能授權；已經拒絕過的會直接跳到系統設定裡改。\n地圖、藍牙、行事曆這些本 App 沒用到，所以不會出現在清單裡。")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.3))
                         .multilineTextAlignment(.center)
@@ -883,6 +891,8 @@ struct ProfileView: View {
         d[.microphone] = captureState(.audio)
         d[.speech] = speechState()
         d[.photosSave] = photoState()
+        d[.photosRead] = photoReadState()
+        d[.motion] = motionState()
 
         let ls = CLLocationManager().authorizationStatus
         d[.locationWhenInUse] = (ls == .authorizedWhenInUse || ls == .authorizedAlways)
@@ -930,6 +940,22 @@ struct ProfileView: View {
         }
     }
 
+    private func photoReadState() -> PermState {
+        switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
+        case .authorized, .limited: return .granted
+        case .notDetermined:        return .notAsked
+        default:                    return .denied
+        }
+    }
+
+    private func motionState() -> PermState {
+        switch CMMotionActivityManager.authorizationStatus() {
+        case .authorized:    return .granted
+        case .notDetermined: return .notAsked
+        default:             return .denied
+        }
+    }
+
     private func request(_ p: AppPerm) {
         switch p {
         case .notifications:
@@ -965,6 +991,29 @@ struct ProfileView: View {
                 PHPhotoLibrary.requestAuthorization(for: .addOnly) { _ in
                     DispatchQueue.main.async { refreshPermissions() }
                 }
+            } else {
+                openSettings()
+            }
+
+        case .photosRead:
+            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined {
+                PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
+                    DispatchQueue.main.async { refreshPermissions() }
+                }
+            } else {
+                openSettings()
+            }
+
+        case .motion:
+            if CMMotionActivityManager.authorizationStatus() == .notDetermined {
+                let mgr = CMMotionActivityManager()
+                motionRequester = mgr
+                mgr.queryActivityStarting(from: Date().addingTimeInterval(-90),
+                                          to: Date(),
+                                          to: .main) { _, _ in
+                    DispatchQueue.main.async { refreshPermissions() }
+                }
+                refreshLater()
             } else {
                 openSettings()
             }
