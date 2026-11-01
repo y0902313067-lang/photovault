@@ -236,36 +236,140 @@ final class CertProbe: NSObject, URLSessionDelegate {
         var result = CertInfo()
         result.subject = SecCertificateCopySubjectSummary(leaf) as String?
 
-        let keys = [kSecOIDX509V1ValidityNotAfter,
-                    kSecOIDX509V1ValidityNotBefore,
-                    kSecOIDX509V1IssuerName] as CFArray
-
-        let rawValues = SecCertificateCopyValues(leaf, keys, nil) as NSDictionary?
-        if let dict = rawValues as? [String: Any] {
-            if let entry = dict[kSecOIDX509V1ValidityNotAfter as String] as? [String: Any] {
-                result.notAfter = dateValue(entry)
-            }
-            if let entry = dict[kSecOIDX509V1ValidityNotBefore as String] as? [String: Any] {
-                result.notBefore = dateValue(entry)
-            }
-            if let entry = dict[kSecOIDX509V1IssuerName as String] as? [String: Any],
-               let items = entry["value"] as? [[String: Any]] {
-                for item in items {
-                    if let label = item["label"] as? String, label == "Common Name",
-                       let value = item["value"] as? String {
-                        result.issuer = value
-                    }
-                }
-            }
+        let der = SecCertificateCopyData(leaf) as Data
+        let parsed = X509Lite.parse(der)
+        result.notBefore = parsed.notBefore
+        result.notAfter = parsed.notAfter
+        if let first = parsed.commonNames.first {
+            result.issuer = first
         }
 
         info = result
     }
+}
 
-    private func dateValue(_ entry: [String: Any]) -> Date? {
-        if let date = entry["value"] as? Date { return date }
-        if let date = entry["value"] as? NSDate { return date as Date }
+// MARK: - 憑證解析（iOS 沒有現成的欄位讀取 API，直接解 DER）
+
+enum X509Lite {
+
+    struct TLV {
+        var tag: UInt8
+        var start: Int
+        var end: Int
+    }
+
+    static func tlv(_ bytes: [UInt8], _ index: Int, _ limit: Int) -> TLV? {
+        guard index + 2 <= limit else { return nil }
+        var cursor = index
+        let tag = bytes[cursor]
+        cursor += 1
+        var length = Int(bytes[cursor])
+        cursor += 1
+
+        if length & 0x80 != 0 {
+            let count = length & 0x7f
+            guard count > 0, count <= 4, cursor + count <= limit else { return nil }
+            var value = 0
+            for _ in 0..<count {
+                value = (value << 8) | Int(bytes[cursor])
+                cursor += 1
+            }
+            length = value
+        }
+
+        let end = cursor + length
+        guard end <= limit, end >= cursor else { return nil }
+        return TLV(tag: tag, start: cursor, end: end)
+    }
+
+    static func children(_ bytes: [UInt8], _ node: TLV) -> [TLV] {
+        var out: [TLV] = []
+        var cursor = node.start
+        var guardCount = 0
+        while cursor < node.end, guardCount < 40 {
+            guard let item = tlv(bytes, cursor, node.end) else { break }
+            out.append(item)
+            cursor = item.end
+            guardCount += 1
+        }
+        return out
+    }
+
+    static func parse(_ data: Data) -> (notBefore: Date?, notAfter: Date?, commonNames: [String]) {
+        let bytes = [UInt8](data)
+        var notBefore: Date?
+        var notAfter: Date?
+
+        if let root = tlv(bytes, 0, bytes.count), root.tag == 0x30 {
+            let rootKids = children(bytes, root)
+            if let tbs = rootKids.first, tbs.tag == 0x30 {
+                let tbsKids = children(bytes, tbs)
+                for kid in tbsKids where kid.tag == 0x30 {
+                    let inner = children(bytes, kid)
+                    guard inner.count == 2 else { continue }
+                    guard inner[0].tag == 0x17 || inner[0].tag == 0x18 else { continue }
+                    notBefore = time(bytes, inner[0])
+                    notAfter = time(bytes, inner[1])
+                    if notBefore != nil || notAfter != nil { break }
+                }
+            }
+        }
+
+        return (notBefore, notAfter, commonNames(bytes))
+    }
+
+    static func time(_ bytes: [UInt8], _ node: TLV) -> Date? {
+        guard let text = String(bytes: bytes[node.start..<node.end], encoding: .utf8) else { return nil }
+        var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        raw = raw.replacingOccurrences(of: "Z", with: "")
+        if let plus = raw.firstIndex(of: "+") { raw = String(raw[raw.startIndex..<plus]) }
+
+        let formats = ["yyMMddHHmmss", "yyMMddHHmm", "yyyyMMddHHmmss", "yyyyMMddHHmm"]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.dateFormat = format
+            if let date = formatter.date(from: raw) { return date }
+        }
         return nil
+    }
+
+    /// 掃出所有 Common Name（issuer 的 CN 在憑證結構裡排在 subject 前面）
+    static func commonNames(_ bytes: [UInt8]) -> [String] {
+        var results: [String] = []
+        var i = 0
+        while i + 6 < bytes.count {
+            if bytes[i] == 0x06, bytes[i + 1] == 0x03,
+               bytes[i + 2] == 0x55, bytes[i + 3] == 0x04, bytes[i + 4] == 0x03 {
+                var cursor = i + 5
+                let tag = bytes[cursor]
+                if tag == 0x0C || tag == 0x13 || tag == 0x16 {
+                    cursor += 1
+                    var length = Int(bytes[cursor])
+                    cursor += 1
+                    if length & 0x80 != 0 {
+                        let count = length & 0x7f
+                        var value = 0
+                        var read = 0
+                        while read < count, cursor < bytes.count {
+                            value = (value << 8) | Int(bytes[cursor])
+                            cursor += 1
+                            read += 1
+                        }
+                        length = value
+                    }
+                    if cursor + length <= bytes.count,
+                       let text = String(bytes: bytes[cursor..<(cursor + length)], encoding: .utf8) {
+                        results.append(text)
+                    }
+                }
+                i += 5
+                continue
+            }
+            i += 1
+        }
+        return results
     }
 }
 
