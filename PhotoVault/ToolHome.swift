@@ -8,6 +8,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
     case device, location, motionSpeed, lostDevice
     case ocr, qrgen, units, time
     case wifiCheck, docScan, idPhoto, recorder
+    case qrStudio, apiLab, domainInfo, baseConv, decider
 
     var id: String { rawValue }
 
@@ -35,6 +36,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "文件掃描"
         case .idPhoto:   return "證件照製作"
         case .recorder:  return "錄音機"
+        case .qrStudio:  return "QR 工作室"
+        case .apiLab:    return "API 測試台"
+        case .domainInfo: return "網域資訊"
+        case .baseConv:  return "進制轉換"
+        case .decider:   return "隨機決策"
         }
     }
 
@@ -62,6 +68,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "DOC SCANNER"
         case .idPhoto:   return "ID PHOTO"
         case .recorder:  return "VOICE RECORDER"
+        case .qrStudio:  return "QRCODE STUDIO"
+        case .apiLab:    return "API WORKBENCH"
+        case .domainInfo: return "DOMAIN INTEL"
+        case .baseConv:  return "BASE CONVERTER"
+        case .decider:   return "DECISION ENGINE"
         }
     }
 
@@ -89,6 +100,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "doc.viewfinder"
         case .idPhoto:   return "person.crop.rectangle"
         case .recorder:  return "waveform"
+        case .qrStudio:  return "wand.and.stars"
+        case .apiLab:    return "chevron.left.forwardslash.chevron.right"
+        case .domainInfo: return "globe"
+        case .baseConv:  return "number"
+        case .decider:   return "die.face.5"
         }
     }
 
@@ -116,6 +132,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return TT.blue
         case .idPhoto:   return TT.amber
         case .recorder:  return TT.violet
+        case .qrStudio:  return TT.violet
+        case .apiLab:    return TT.teal
+        case .domainInfo: return TT.blue
+        case .baseConv:  return TT.amber
+        case .decider:   return TT.lime
         }
     }
 }
@@ -311,6 +332,11 @@ struct ToolDestinationView: View {
         case .docScan:   DocScanView()
         case .idPhoto:   IDPhotoView()
         case .recorder:  RecorderView()
+        case .qrStudio:  QRStudioView()
+        case .apiLab:    APILabView()
+        case .domainInfo: DomainInfoView()
+        case .baseConv:  BaseConvertView()
+        case .decider:   DecisionEngineView()
         }
     }
 }

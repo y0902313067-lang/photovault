@@ -238,7 +238,11 @@ struct FavoritePickerView: View {
         ToolGroup(name: "影像與計算", en: "IMAGING & MATH", accent: TT.amber,
                   tools: [.ocr, .qrgen, .units, .time]),
         ToolGroup(name: "文件與聲音", en: "DOCUMENT & AUDIO", accent: TT.lime,
-                  tools: [.wifiCheck, .docScan, .idPhoto, .recorder])
+                  tools: [.wifiCheck, .docScan, .idPhoto, .recorder]),
+        ToolGroup(name: "開發與網路", en: "DEVELOPER", accent: TT.teal,
+                  tools: [.apiLab, .domainInfo]),
+        ToolGroup(name: "創作與資料", en: "CREATE & DATA", accent: TT.indigo,
+                  tools: [.qrStudio, .baseConv, .decider])
     ]
 
     var body: some View {

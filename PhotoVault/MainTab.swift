@@ -107,6 +107,10 @@ struct MoreToolsView: View {
     @State private var appeared = false
 
     private let groups: [ToolGroup] = [
+        ToolGroup(name: "開發與網路", en: "DEVELOPER", accent: TT.teal,
+                  tools: [.apiLab, .domainInfo]),
+        ToolGroup(name: "創作與資料", en: "CREATE & DATA", accent: TT.indigo,
+                  tools: [.qrStudio, .baseConv, .decider]),
         ToolGroup(name: "網路安全", en: "NETWORK SAFETY", accent: TT.teal,
                   tools: [.wifiCheck]),
         ToolGroup(name: "文件與證件", en: "DOCUMENT & ID", accent: TT.blue,
