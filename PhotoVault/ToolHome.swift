@@ -8,6 +8,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
     case device, location, motionSpeed, lostDevice
     case ocr, qrgen, units, time
     case wifiCheck, docScan, idPhoto, recorder
+    case translate, storage
 
     var id: String { rawValue }
 
@@ -35,6 +36,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "文件掃描"
         case .idPhoto:   return "證件照製作"
         case .recorder:  return "錄音機"
+        case .translate: return "文字翻譯"
+        case .storage:   return "儲存空間"
         }
     }
 
@@ -62,6 +65,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "DOC SCANNER"
         case .idPhoto:   return "ID PHOTO"
         case .recorder:  return "VOICE RECORDER"
+        case .translate: return "TRANSLATOR"
+        case .storage:   return "STORAGE ANALYZER"
         }
     }
 
@@ -89,6 +94,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return "doc.viewfinder"
         case .idPhoto:   return "person.crop.rectangle"
         case .recorder:  return "waveform"
+        case .translate: return "character.book.closed"
+        case .storage:   return "internaldrive"
         }
     }
 
@@ -116,6 +123,8 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .docScan:   return TT.blue
         case .idPhoto:   return TT.amber
         case .recorder:  return TT.violet
+        case .translate: return TT.mint
+        case .storage:   return TT.teal
         }
     }
 }
@@ -145,7 +154,9 @@ struct HomeView: View {
         ToolGroup(name: "資訊與位置", en: "DEVICE & POSITION", accent: TT.blue,
                   tools: [.device, .location, .motionSpeed, .lostDevice]),
         ToolGroup(name: "影像與計算", en: "IMAGING & MATH", accent: TT.amber,
-                  tools: [.ocr, .qrgen, .units, .time])
+                  tools: [.ocr, .qrgen, .units, .time]),
+        ToolGroup(name: "語言與系統", en: "LANGUAGE & SYSTEM", accent: TT.lime,
+                  tools: [.translate, .storage])
     ]
 
     private var localToolCount: Int {
@@ -160,7 +171,9 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
                     header
-                    featured
+                    FavoriteSection { tool in
+                        route = tool
+                    }
                     ForEach(groups) { group in
                         groupSection(group)
                     }
@@ -193,8 +206,8 @@ struct HomeView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    MintDragonMark(size: 30)
+                HStack(spacing: 10) {
+                    MintDragonMark(size: 44)
                     Text("薄荷工具箱")
                         .font(.system(size: 25, weight: .bold))
                         .foregroundStyle(.white)
@@ -220,78 +233,6 @@ struct HomeView: View {
         }
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 8)
-    }
-
-    // MARK: 主推卡片
-
-    private var featured: some View {
-        Button {
-            route = .speed
-        } label: {
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(colors: [TT.teal.opacity(0.22),
-                                                TT.blue.opacity(0.14),
-                                                Color.white.opacity(0.04)],
-                                       startPoint: .topLeading,
-                                       endPoint: .bottomTrailing)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(colors: [TT.teal.opacity(0.55),
-                                                        TT.blue.opacity(0.22),
-                                                        Color.white.opacity(0.05)],
-                                               startPoint: .topLeading,
-                                               endPoint: .bottomTrailing),
-                                lineWidth: 1)
-                    )
-
-                HStack(spacing: 15) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(LinearGradient(colors: [TT.teal, TT.blue],
-                                                 startPoint: .topLeading,
-                                                 endPoint: .bottomTrailing))
-                            .frame(width: 56, height: 56)
-                            .shadow(color: TT.blue.opacity(0.5), radius: 16, y: 6)
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.system(size: 23, weight: .semibold))
-                            .foregroundStyle(TT.ink)
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("網路診斷")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("下載 · 上傳 · 延遲 · 抖動")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.42))
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(TT.mint)
-                                .frame(width: 4.5, height: 4.5)
-                            Text("即時速度曲線")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .foregroundStyle(TT.mint.opacity(0.75))
-                        }
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.35))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-            }
-            .shadow(color: TT.blue.opacity(0.2), radius: 24, y: 12)
-        }
-        .buttonStyle(.plain)
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 12)
     }
 
     // MARK: 分組區塊
@@ -381,6 +322,8 @@ struct ToolDestinationView: View {
         case .docScan:   DocScanView()
         case .idPhoto:   IDPhotoView()
         case .recorder:  RecorderView()
+        case .translate: TranslateView()
+        case .storage:   StorageAnalyzerView()
         }
     }
 }

@@ -112,7 +112,9 @@ struct MoreToolsView: View {
         ToolGroup(name: "文件與證件", en: "DOCUMENT & ID", accent: TT.blue,
                   tools: [.docScan, .idPhoto]),
         ToolGroup(name: "聲音", en: "AUDIO", accent: TT.violet,
-                  tools: [.recorder])
+                  tools: [.recorder]),
+        ToolGroup(name: "語言與系統", en: "LANGUAGE & SYSTEM", accent: TT.lime,
+                  tools: [.translate, .storage])
     ]
 
     private var localToolCount: Int {
@@ -152,18 +154,7 @@ struct MoreToolsView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 9) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(LinearGradient(colors: [TT.violet.opacity(0.85),
-                                                          TT.blue.opacity(0.55)],
-                                                 startPoint: .topLeading,
-                                                 endPoint: .bottomTrailing))
-                            .frame(width: 30, height: 30)
-                            .shadow(color: TT.violet.opacity(0.45), radius: 10, y: 4)
-                        Image(systemName: "square.stack.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(TT.ink)
-                    }
+                    MintDragonMark(size: 40)
                     Text("更多工具")
                         .font(.system(size: 25, weight: .bold))
                         .foregroundStyle(.white)
