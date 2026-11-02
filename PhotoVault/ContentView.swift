@@ -337,83 +337,175 @@ private struct PrimaryButton: View {
 struct RegisterView: View {
     @EnvironmentObject var store: AppStore
 
+    private var headerLogin: Bool { store.isLoginMode || store.resetMode }
+
     var body: some View {
         ZStack {
             TechGrid().ignoresSafeArea()
 
             ScrollView {
-            VStack(spacing: 0) {
-                TechHeader(isLogin: store.isLoginMode)
+                VStack(spacing: 0) {
+                    TechHeader(isLogin: headerLogin)
 
-                VStack(spacing: 16) {
-                    if store.isLoginMode {
-                        FieldBox(title: "帳號", placeholder: "註冊時填的帳號", text: $store.account, icon: "at")
-                        FieldBox(title: "密碼", placeholder: "註冊時填的密碼", text: $store.password, secure: true, icon: "lock.fill")
-                    } else {
-                        FieldBox(title: "暱稱（8 字內）", placeholder: "例如：小美", text: $store.nickname, limit: 8, icon: "person.fill")
-                        FieldBox(title: "帳號", placeholder: "隨便填，沒有限制", text: $store.account, icon: "at")
-                        FieldBox(title: "密碼", placeholder: "隨便填，沒有限制", text: $store.password, secure: true, icon: "lock.fill")
-                        FieldBox(title: "再次輸入密碼", placeholder: "再填一次", text: $store.password2, secure: true, icon: "lock.rotation")
-
-                        if !store.password2.isEmpty && !store.matchOK {
-                            HStack(spacing: 6) {
-                                Image(systemName: "exclamationmark.circle.fill")
-                                Text("兩次密碼不一致")
-                                Spacer()
+                    VStack(spacing: 16) {
+                        if store.resetMode {
+                            FieldBox(title: "註冊時填的信箱", placeholder: "you@example.com",
+                                     text: $store.email, icon: "envelope.fill")
+                            if store.codeSent {
+                                FieldBox(title: "6 位驗證碼", placeholder: "000000",
+                                         text: $store.code, limit: 6, icon: "number")
                             }
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.5))
+                        } else if store.isLoginMode {
+                            FieldBox(title: "帳號或信箱", placeholder: "帳號，或註冊時的信箱",
+                                     text: $store.account, icon: "at")
+                            FieldBox(title: "密碼（8 位以上）", placeholder: "註冊時設的密碼",
+                                     text: $store.password, secure: true, icon: "lock.fill")
+                        } else {
+                            FieldBox(title: "暱稱（8 字內）", placeholder: "例如：小美",
+                                     text: $store.nickname, limit: 8, icon: "person.fill")
+                            FieldBox(title: "帳號（6 位以上）", placeholder: "至少 6 個字，之後登入用",
+                                     text: $store.account, icon: "at")
+                            FieldBox(title: "信箱（收驗證碼用）", placeholder: "you@example.com",
+                                     text: $store.email, icon: "envelope.fill")
+                            FieldBox(title: "密碼（8 位以上）", placeholder: "至少 8 個字",
+                                     text: $store.password, secure: true, icon: "lock.fill")
+                            FieldBox(title: "再次輸入密碼", placeholder: "再填一次",
+                                     text: $store.password2, secure: true, icon: "lock.rotation")
+
+                            if !store.password2.isEmpty && !store.matchOK {
+                                tipRow("兩次密碼不一致", bad: true)
+                            }
+                            if !store.account.isEmpty && !store.accountOK {
+                                tipRow("帳號至少要 6 個字", bad: false)
+                            }
+                            if !store.password.isEmpty && !store.passwordOK {
+                                tipRow("密碼至少要 8 個字", bad: false)
+                            }
+
+                            if store.codeSent {
+                                FieldBox(title: "6 位驗證碼", placeholder: "000000",
+                                         text: $store.code, limit: 6, icon: "number")
+                            }
                         }
                     }
-                }
-                .padding(.horizontal, 22)
+                    .padding(.horizontal, 22)
 
-                if let err = store.errorText, !err.isEmpty {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                        Text(err)
-                        Spacer()
+                    if store.codeSent {
+                        HStack(spacing: 8) {
+                            Image(systemName: "envelope.badge.shield.half.filled")
+                                .foregroundStyle(Brand.mint)
+                            Text("驗證碼已寄到 \(store.email)")
+                                .foregroundStyle(.white.opacity(0.6))
+                            Spacer()
+                            Button {
+                                store.sendCode()
+                            } label: {
+                                Text(store.cooldown > 0 ? "\(store.cooldown) 秒後可重發" : "重新發送")
+                                    .foregroundStyle(store.cooldown > 0 ? Color.white.opacity(0.35) : Brand.mint)
+                            }
+                            .disabled(store.cooldown > 0 || store.sendingCode)
+                        }
+                        .font(.system(size: 12.5))
+                        .padding(.horizontal, 26)
+                        .padding(.top, 16)
                     }
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.5))
-                    .padding(.horizontal, 26)
+
+                    if let err = store.errorText, !err.isEmpty {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                            Text(err)
+                            Spacer()
+                        }
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.5))
+                        .padding(.horizontal, 26)
+                        .padding(.top, 14)
+                    }
+
+                    PrimaryButton(title: mainTitle, enabled: mainEnabled) {
+                        mainAction()
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 26)
+
+                    if store.isLoginMode && !store.resetMode {
+                        Button {
+                            store.enterReset()
+                        } label: {
+                            Text("忘記密碼？用信箱驗證碼登入")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Brand.mint.opacity(0.9))
+                                .padding(.vertical, 8)
+                        }
+                        .padding(.top, 14)
+                    }
+
+                    Button {
+                        if store.resetMode { store.exitReset() }
+                        else { store.switchMode(toLogin: !store.isLoginMode) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(footTitle.0).foregroundStyle(.white.opacity(0.45))
+                            Text(footTitle.1).foregroundStyle(Brand.mint.opacity(0.95))
+                        }
+                        .font(.system(size: 13.5))
+                        .padding(.vertical, 9)
+                        .padding(.horizontal, 16)
+                        .background(
+                            Capsule().fill(Color.white.opacity(0.05))
+                                .overlay(Capsule().strokeBorder(Brand.mint.opacity(0.18), lineWidth: 0.8))
+                        )
+                    }
                     .padding(.top, 14)
+                    .padding(.bottom, 44)
                 }
-
-                PrimaryButton(title: store.isLoginMode ? (store.busy ? "登入中…" : "登入") : "下一步",
-                              enabled: store.isLoginMode ? (store.loginFormOK && !store.busy) : store.formOK) {
-                    if store.isLoginMode {
-                        store.doLogin()
-                    } else {
-                        store.goAvatarStep()
-                    }
-                }
-                .padding(.horizontal, 22)
-                .padding(.top, 26)
-
-                Button {
-                    store.switchMode(toLogin: !store.isLoginMode)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(store.isLoginMode ? "還沒有帳號？" : "已經註冊過？")
-                            .foregroundStyle(.white.opacity(0.45))
-                        Text(store.isLoginMode ? "建立新帳號" : "登入已有帳號")
-                            .foregroundStyle(Brand.mint.opacity(0.95))
-                    }
-                    .font(.system(size: 13.5))
-                    .padding(.vertical, 9)
-                    .padding(.horizontal, 16)
-                    .background(
-                        Capsule().fill(Color.white.opacity(0.05))
-                            .overlay(Capsule().strokeBorder(Brand.mint.opacity(0.18), lineWidth: 0.8))
-                    )
-                }
-                .padding(.top, 18)
-                .padding(.bottom, 44)
-            }
             }
             .scrollDismissesKeyboard(.interactively)
         }
+    }
+
+    private var mainTitle: String {
+        if store.resetMode {
+            if !store.codeSent { return store.sendingCode ? "寄送中…" : "發送驗證碼" }
+            return store.busy ? "驗證中…" : "驗證並登入"
+        }
+        if store.isLoginMode { return store.busy ? "登入中…" : "登入" }
+        if !store.codeSent { return store.sendingCode ? "寄送中…" : "發送驗證碼" }
+        return store.busy ? "驗證中…" : "驗證並繼續"
+    }
+
+    private var mainEnabled: Bool {
+        if store.resetMode {
+            return store.codeSent ? (store.codeOK && !store.busy) : (store.resetFormOK && !store.sendingCode && store.cooldown == 0)
+        }
+        if store.isLoginMode { return store.loginFormOK && !store.busy }
+        if !store.codeSent { return store.formOK && !store.sendingCode }
+        return store.codeOK && !store.busy
+    }
+
+    private func mainAction() {
+        if store.resetMode {
+            if store.codeSent { store.verifyCode() } else { store.sendCode() }
+            return
+        }
+        if store.isLoginMode { store.doLogin(); return }
+        if store.codeSent { store.verifyCode() } else { store.sendCode() }
+    }
+
+    private var footTitle: (String, String) {
+        if store.resetMode { return ("想起來了？", "回密碼登入") }
+        if store.isLoginMode { return ("還沒有帳號？", "建立新帳號") }
+        return ("已經註冊過？", "登入已有帳號")
+    }
+
+    private func tipRow(_ text: String, bad: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: bad ? "exclamationmark.circle.fill" : "info.circle.fill")
+            Text(text)
+            Spacer()
+        }
+        .font(.system(size: 12.5))
+        .foregroundStyle(bad ? Color(red: 1.0, green: 0.45, blue: 0.5) : Color.white.opacity(0.45))
     }
 }
 
