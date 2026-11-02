@@ -27,7 +27,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于把照片保存到相簿。</string>
 	<key>NSCameraUsageDescription</key>
-	<string>用于扫描二维码、辨识文字与拍摄照片。</string>
+	<string>用于扫描二维码、辨识文字、拍摄照片，以及防偷拍扫描时分析画面中的异常光源。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于分贝计量测环境噪音，以及录音机的录音功能。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

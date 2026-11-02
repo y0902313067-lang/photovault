@@ -10,6 +10,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
     case wifiCheck, docScan, idPhoto, recorder
     case qrStudio, apiLab, domainInfo, baseConv, decider
     case coordConv, exif, pedometer, rate, loan
+    case antiSpy
 
     var id: String { rawValue }
 
@@ -47,6 +48,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .pedometer: return "計步與活動"
         case .rate:      return "即時匯率"
         case .loan:      return "貸款試算"
+        case .antiSpy:   return "防偷拍掃描"
         }
     }
 
@@ -84,6 +86,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .pedometer: return "STEP COUNTER"
         case .rate:      return "LIVE EXCHANGE RATE"
         case .loan:      return "LOAN CALCULATOR"
+        case .antiSpy:   return "COUNTER-SURVEILLANCE"
         }
     }
 
@@ -121,6 +124,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .pedometer: return "figure.walk"
         case .rate:      return "dollarsign.circle"
         case .loan:      return "percent"
+        case .antiSpy:   return "viewfinder.circle"
         }
     }
 
@@ -158,6 +162,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .pedometer: return TT.mint
         case .rate:      return TT.teal
         case .loan:      return TT.indigo
+        case .antiSpy:   return TT.rose
         }
     }
 }
@@ -180,8 +185,10 @@ struct HomeView: View {
     @State private var appeared = false
 
     private let groups: [ToolGroup] = [
+        ToolGroup(name: "隱私防護", en: "PRIVACY GUARD", accent: TT.rose,
+                  tools: [.antiSpy, .password]),
         ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
-                  tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab, .password]),
+                  tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab]),
         ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
                   tools: [.motionSpeed, .pedometer, .level, .compass, .magnet, .gravity,
                           .barometer, .decibel, .recorder]),
@@ -364,6 +371,7 @@ struct ToolDestinationView: View {
         case .pedometer: PedometerView()
         case .rate:      RateView()
         case .loan:      LoanView()
+        case .antiSpy:   AntiSpyView()
         }
     }
 }
