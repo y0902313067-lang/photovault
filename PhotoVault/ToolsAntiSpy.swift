@@ -1189,7 +1189,8 @@ struct AntiSpyView: View {
                 TTMeterBar(ratio: engine.signal, accent: TT.rose, height: 5)
                 HStack {
                     Text("畫面訊號")
-                        .font(.system(size: 9.5, tracking: 1))
+                        .font(.system(size: 9.5))
+                        .tracking(1)
                         .foregroundStyle(.white.opacity(0.28))
                     Spacer()
                     Text("\(engine.liveCount) 個候選")
