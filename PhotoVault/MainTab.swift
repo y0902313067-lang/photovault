@@ -106,12 +106,7 @@ struct MoreToolsView: View {
     @State private var route: ToolRoute?
     @State private var appeared = false
 
-    private let groups: [ToolGroup] = [
-        ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
-                  tools: [.ocr, .qrscan, .docScan, .idPhoto, .exif]),
-        ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
-                  tools: [.qrStudio, .qrgen, .decider, .loan])
-    ]
+    private let groups: [ToolGroup] = ToolCatalog.moreGroups
 
     private var localToolCount: Int {
         groups.reduce(0) { $0 + $1.tools.count }

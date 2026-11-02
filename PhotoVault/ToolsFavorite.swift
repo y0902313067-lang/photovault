@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 常用工具儲存
 
@@ -79,11 +80,12 @@ struct FavoriteSection: View {
                                  onRemove: { favorites.remove(tool) })
                 }
 
-                if !favorites.isFull {
-                    AddFavoriteCard(isEmptyState: favorites.tools.isEmpty) {
-                        showPicker = true
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }
+                AddFavoriteCard(isEmptyState: favorites.tools.isEmpty,
+                                isFull: favorites.isFull,
+                                count: favorites.tools.count,
+                                limit: favorites.limit) {
+                    showPicker = true
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
             }
 
@@ -187,7 +189,12 @@ private struct FavoriteCard: View {
 
 private struct AddFavoriteCard: View {
     let isEmptyState: Bool
+    let isFull: Bool
+    let count: Int
+    let limit: Int
     let action: () -> Void
+
+    private var tint: Color { isFull ? TT.amber : TT.mint }
 
     var body: some View {
         Button(action: action) {
@@ -199,20 +206,20 @@ private struct AddFavoriteCard: View {
                     .strokeBorder(
                         style: StrokeStyle(lineWidth: 1.2, dash: [6, 5])
                     )
-                    .foregroundStyle(TT.mint.opacity(0.32))
+                    .foregroundStyle(tint.opacity(0.32))
 
                 VStack(spacing: 9) {
                     ZStack {
                         Circle()
-                            .fill(TT.mint.opacity(0.12))
+                            .fill(tint.opacity(0.12))
                             .frame(width: 38, height: 38)
-                        Image(systemName: "plus")
+                        Image(systemName: isFull ? "slider.horizontal.3" : "plus")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(TT.mint)
+                            .foregroundStyle(tint)
                     }
-                    Text("加入常用工具")
+                    Text(isFull ? "已滿 \(count)/\(limit) · 調整" : "加入常用工具")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.white.opacity(isFull ? 0.5 : 0.4))
                 }
             }
             .frame(height: 112)
@@ -228,21 +235,10 @@ struct FavoritePickerView: View {
     @ObservedObject private var favorites = FavoritesStore.shared
     @Environment(\.dismiss) private var dismiss
 
-    private let groups: [ToolGroup] = [
-        ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
-                  tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab, .password]),
-        ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
-                  tools: [.motionSpeed, .level, .compass, .magnet, .gravity, .barometer,
-                          .decibel, .recorder]),
-        ToolGroup(name: "裝置與位置", en: "DEVICE & POSITION", accent: TT.blue,
-                  tools: [.device, .location, .lostDevice]),
-        ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
-                  tools: [.units, .baseConv, .time]),
-        ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
-                  tools: [.ocr, .qrscan, .docScan, .idPhoto]),
-        ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
-                  tools: [.qrStudio, .qrgen, .decider])
-    ]
+    /// 選擇器吃的是完整目錄，之後新增工具不必再回來補這份清單
+    private let groups: [ToolGroup] = ToolCatalog.allGroups
+
+    @State private var fullHint = false
 
     var body: some View {
         ZStack {
@@ -255,6 +251,9 @@ struct FavoritePickerView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 20) {
                         hint
+                        if !favorites.tools.isEmpty {
+                            selectedStrip
+                        }
                         ForEach(groups) { group in
                             groupBlock(group)
                         }
@@ -303,13 +302,76 @@ struct FavoritePickerView: View {
 
     private var hint: some View {
         HStack(spacing: 7) {
-            Image(systemName: "hand.tap")
+            Image(systemName: fullHint ? "exclamationmark.circle" : "hand.tap")
                 .font(.system(size: 10))
-            Text("點一下加入，再點一下移除；最多 \(favorites.limit) 個")
-                .font(.system(size: 10.5))
+            Text(hintText)
+                .font(.system(size: 10.5, weight: fullHint ? .semibold : .regular))
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .foregroundStyle(.white.opacity(0.28))
+        .foregroundStyle(fullHint ? TT.amber.opacity(0.95) : Color.white.opacity(0.28))
+        .animation(.easeInOut(duration: 0.2), value: fullHint)
+    }
+
+    private var hintText: String {
+        if fullHint || favorites.isFull {
+            return "已選滿 \(favorites.limit) 個 —— 先在上方點掉一個，就能換新的"
+        }
+        return "點一下加入，再點一下移除；最多 \(favorites.limit) 個"
+    }
+
+    // MARK: 已選區（點一下直接移除，滿額時就是用來換的）
+
+    private var selectedStrip: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Text("已選 \(favorites.tools.count) / \(favorites.limit)")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(favorites.isFull ? TT.amber : TT.mint)
+                Spacer(minLength: 0)
+                Text("點一下移除")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.white.opacity(0.24))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(favorites.tools) { tool in
+                        Button {
+                            favorites.remove(tool)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: tool.icon)
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                Text(tool.title)
+                                    .font(.system(size: 10.5, weight: .medium))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .opacity(0.55)
+                            }
+                            .foregroundStyle(.white.opacity(0.88))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(tool.accent.opacity(0.16)))
+                            .overlay(Capsule().strokeBorder(tool.accent.opacity(0.35),
+                                                            lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
     }
 
     private func groupBlock(_ group: ToolGroup) -> some View {
@@ -352,10 +414,19 @@ struct FavoritePickerView: View {
 
     private func row(_ tool: ToolRoute) -> some View {
         let selected = favorites.contains(tool)
-        let disabled = !selected && favorites.isFull
+        let locked = !selected && favorites.isFull
 
         return Button {
-            guard !disabled else { return }
+            guard !locked else {
+                // 以前這裡是靜默 disabled，按了完全沒反應，看起來像壞掉
+                withAnimation(.easeInOut(duration: 0.18)) { fullHint = true }
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_400_000_000)
+                    withAnimation(.easeInOut(duration: 0.25)) { fullHint = false }
+                }
+                return
+            }
             favorites.toggle(tool)
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } label: {
@@ -372,11 +443,11 @@ struct FavoritePickerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tool.title)
                         .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(disabled ? 0.28 : 0.9))
+                        .foregroundStyle(.white.opacity(locked ? 0.42 : 0.9))
                     Text(tool.subtitle)
                         .font(.system(size: 8.5, weight: .bold))
                         .tracking(1)
-                        .foregroundStyle(.white.opacity(0.2))
+                        .foregroundStyle(.white.opacity(locked ? 0.14 : 0.2))
                 }
 
                 Spacer(minLength: 0)
@@ -389,6 +460,10 @@ struct FavoritePickerView: View {
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(TT.ink)
+                    } else if locked {
+                        Image(systemName: "lock")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.3))
                     }
                 }
             }
@@ -397,6 +472,5 @@ struct FavoritePickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
     }
 }

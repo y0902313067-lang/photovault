@@ -177,6 +177,39 @@ struct ToolGroup: Identifiable {
     let tools: [ToolRoute]
 }
 
+// MARK: - 工具目錄（唯一來源）
+//
+// 首頁、更多工具、常用工具選擇器全部吃這一份，避免三處各寫一份而漏工具。
+
+enum ToolCatalog {
+    static let privacy = ToolGroup(name: "隱私防護", en: "PRIVACY GUARD", accent: TT.rose,
+                                   tools: [.antiSpy, .password])
+    static let network = ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
+                                   tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab])
+    static let sensors = ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
+                                   tools: [.motionSpeed, .pedometer, .level, .compass,
+                                           .magnet, .gravity, .barometer, .decibel, .recorder])
+    static let device = ToolGroup(name: "裝置與位置", en: "DEVICE & POSITION", accent: TT.blue,
+                                  tools: [.device, .location, .coordConv, .lostDevice])
+    static let convert = ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
+                                   tools: [.units, .baseConv, .rate, .time])
+    static let imaging = ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
+                                   tools: [.ocr, .qrscan, .docScan, .idPhoto, .exif])
+    static let generate = ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
+                                    tools: [.qrStudio, .qrgen, .decider, .loan])
+
+    static let homeGroups: [ToolGroup] = [privacy, network, sensors, device, convert]
+    static let moreGroups: [ToolGroup] = [imaging, generate]
+
+    /// 選擇器用的完整清單：首頁 + 更多工具
+    static let allGroups: [ToolGroup] = homeGroups + moreGroups
+
+    /// 全部工具數，用來核對有沒有任何一個漏在分組之外
+    static var toolCount: Int {
+        allGroups.reduce(0) { $0 + $1.tools.count }
+    }
+}
+
 // MARK: - 主頁
 
 struct HomeView: View {
@@ -184,19 +217,7 @@ struct HomeView: View {
     @State private var route: ToolRoute?
     @State private var appeared = false
 
-    private let groups: [ToolGroup] = [
-        ToolGroup(name: "隱私防護", en: "PRIVACY GUARD", accent: TT.rose,
-                  tools: [.antiSpy, .password]),
-        ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
-                  tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab]),
-        ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
-                  tools: [.motionSpeed, .pedometer, .level, .compass, .magnet, .gravity,
-                          .barometer, .decibel, .recorder]),
-        ToolGroup(name: "裝置與位置", en: "DEVICE & POSITION", accent: TT.blue,
-                  tools: [.device, .location, .coordConv, .lostDevice]),
-        ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
-                  tools: [.units, .baseConv, .rate, .time])
-    ]
+    private let groups: [ToolGroup] = ToolCatalog.homeGroups
 
     private var localToolCount: Int {
         groups.reduce(0) { $0 + $1.tools.count }
