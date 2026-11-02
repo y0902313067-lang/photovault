@@ -9,6 +9,7 @@ enum ToolRoute: String, Identifiable, CaseIterable {
     case ocr, qrgen, units, time
     case wifiCheck, docScan, idPhoto, recorder
     case qrStudio, apiLab, domainInfo, baseConv, decider
+    case coordConv, exif, pedometer, rate, loan
 
     var id: String { rawValue }
 
@@ -41,6 +42,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .domainInfo: return "網域資訊"
         case .baseConv:  return "進制轉換"
         case .decider:   return "隨機決策"
+        case .coordConv: return "座標轉換器"
+        case .exif:      return "EXIF 檢視與清除"
+        case .pedometer: return "計步與活動"
+        case .rate:      return "即時匯率"
+        case .loan:      return "貸款試算"
         }
     }
 
@@ -73,6 +79,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .domainInfo: return "DOMAIN INTEL"
         case .baseConv:  return "BASE CONVERTER"
         case .decider:   return "DECISION ENGINE"
+        case .coordConv: return "COORDINATE CONVERTER"
+        case .exif:      return "PHOTO METADATA"
+        case .pedometer: return "STEP COUNTER"
+        case .rate:      return "LIVE EXCHANGE RATE"
+        case .loan:      return "LOAN CALCULATOR"
         }
     }
 
@@ -105,6 +116,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .domainInfo: return "globe"
         case .baseConv:  return "number"
         case .decider:   return "die.face.5"
+        case .coordConv: return "mappin.and.ellipse"
+        case .exif:      return "photo.on.rectangle.angled"
+        case .pedometer: return "figure.walk"
+        case .rate:      return "dollarsign.circle"
+        case .loan:      return "percent"
         }
     }
 
@@ -137,6 +153,11 @@ enum ToolRoute: String, Identifiable, CaseIterable {
         case .domainInfo: return TT.blue
         case .baseConv:  return TT.amber
         case .decider:   return TT.lime
+        case .coordConv: return TT.lime
+        case .exif:      return TT.blue
+        case .pedometer: return TT.mint
+        case .rate:      return TT.teal
+        case .loan:      return TT.indigo
         }
     }
 }
@@ -162,12 +183,12 @@ struct HomeView: View {
         ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
                   tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab, .password]),
         ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
-                  tools: [.motionSpeed, .level, .compass, .magnet, .gravity, .barometer,
-                          .decibel, .recorder]),
+                  tools: [.motionSpeed, .pedometer, .level, .compass, .magnet, .gravity,
+                          .barometer, .decibel, .recorder]),
         ToolGroup(name: "裝置與位置", en: "DEVICE & POSITION", accent: TT.blue,
-                  tools: [.device, .location, .lostDevice]),
+                  tools: [.device, .location, .coordConv, .lostDevice]),
         ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
-                  tools: [.units, .baseConv, .time])
+                  tools: [.units, .baseConv, .rate, .time])
     ]
 
     private var localToolCount: Int {
@@ -235,7 +256,7 @@ struct HomeView: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.3))
                 }
-                Text("網路安全、測速、感測器與小算盤，全部在手機本機完成")
+                Text("網路安全、感測器、座標與試算，多數工具在本機完成")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.32))
                     .padding(.top, 1)
@@ -338,6 +359,11 @@ struct ToolDestinationView: View {
         case .domainInfo: DomainInfoView()
         case .baseConv:  BaseConvertView()
         case .decider:   DecisionEngineView()
+        case .coordConv: CoordConvView()
+        case .exif:      ExifToolView()
+        case .pedometer: PedometerView()
+        case .rate:      RateView()
+        case .loan:      LoanView()
         }
     }
 }

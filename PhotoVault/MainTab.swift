@@ -108,9 +108,9 @@ struct MoreToolsView: View {
 
     private let groups: [ToolGroup] = [
         ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
-                  tools: [.ocr, .qrscan, .docScan, .idPhoto]),
+                  tools: [.ocr, .qrscan, .docScan, .idPhoto, .exif]),
         ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
-                  tools: [.qrStudio, .qrgen, .decider])
+                  tools: [.qrStudio, .qrgen, .decider, .loan])
     ]
 
     private var localToolCount: Int {
@@ -167,7 +167,7 @@ struct MoreToolsView: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.3))
                 }
-                Text("影像處理與產生工具，掃描、辨識、生碼都在這裡")
+                Text("影像、生碼與試算工具，掃描、辨識、解 EXIF 都在這裡")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.32))
                     .padding(.top, 1)
