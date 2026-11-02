@@ -182,10 +182,12 @@ struct ToolGroup: Identifiable {
 // 首頁、更多工具、常用工具選擇器全部吃這一份，避免三處各寫一份而漏工具。
 
 enum ToolCatalog {
+    /// 目前暫無工具掛在此組（防偷拍 → 影像與媒體、密碼強度 → 網路安全）
+    /// 保留定義，之後有純隱私類工具可直接掛回來
     static let privacy = ToolGroup(name: "隱私防護", en: "PRIVACY GUARD", accent: TT.rose,
-                                   tools: [.antiSpy, .password])
+                                   tools: [])
     static let network = ToolGroup(name: "網路安全", en: "NETWORK SECURITY", accent: TT.teal,
-                                   tools: [.speed, .wifiCheck, .domainInfo, .link, .apiLab])
+                                   tools: [.speed, .wifiCheck, .password, .domainInfo, .link, .apiLab])
     static let sensors = ToolGroup(name: "感測與運動", en: "SENSORS & MOTION", accent: TT.violet,
                                    tools: [.motionSpeed, .pedometer, .level, .compass,
                                            .magnet, .gravity, .barometer, .decibel, .recorder])
@@ -194,12 +196,15 @@ enum ToolCatalog {
     static let convert = ToolGroup(name: "換算與計算", en: "CONVERT & CALC", accent: TT.amber,
                                    tools: [.units, .baseConv, .rate, .time])
     static let imaging = ToolGroup(name: "影像與媒體", en: "IMAGING & MEDIA", accent: TT.blue,
-                                   tools: [.ocr, .qrscan, .docScan, .idPhoto, .exif])
+                                   tools: [.antiSpy, .ocr, .qrscan, .docScan, .idPhoto, .exif])
     static let generate = ToolGroup(name: "產生與決策", en: "GENERATE & DECIDE", accent: TT.indigo,
                                     tools: [.qrStudio, .qrgen, .decider, .loan])
 
+    // 空組自動不顯示（目前「隱私防護」已清空，工具分到網路安全與影像與媒體）
     static let homeGroups: [ToolGroup] = [privacy, network, sensors, device, convert]
+        .filter { !$0.tools.isEmpty }
     static let moreGroups: [ToolGroup] = [imaging, generate]
+        .filter { !$0.tools.isEmpty }
 
     /// 選擇器用的完整清單：首頁 + 更多工具
     static let allGroups: [ToolGroup] = homeGroups + moreGroups
