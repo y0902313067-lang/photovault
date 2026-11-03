@@ -307,6 +307,7 @@ struct ProfilePageView: View {
     @State private var loading = true
     @State private var guestProfile = ""
     @State private var avatarPicker = false
+    private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     private var isMe: Bool { profileID == nil }
 
@@ -379,6 +380,10 @@ struct ProfilePageView: View {
                 AvatarPickerSheet()
             }
             .task { await reload() }
+            .onReceive(ticker) { _ in
+                guard isMe else { return }
+                Task { await store.refreshSocial() }
+            }
         }
     }
 
