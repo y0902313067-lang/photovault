@@ -325,7 +325,7 @@ enum SocialAPI {
         }
 
         field("user", userID)
-        field("text", ChatMessage.composeText(body: text, replyTo: replyTo))
+        field("text", text)
 
         for (i, img) in images.prefix(9).enumerated() {
             guard let data = img.jpegData(compressionQuality: 0.82) else { continue }
@@ -445,7 +445,7 @@ enum SocialAPI {
             body.append(Data("\(value)\r\n".utf8))
         }
         field("user", userID)
-        field("text", text)
+        field("text", ChatMessage.composeText(body: text, replyTo: replyTo))
 
         if let image, let data = image.jpegData(compressionQuality: 0.8) {
             body.append(Data("--\(boundary)\r\n".utf8))
