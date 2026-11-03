@@ -326,36 +326,47 @@ struct TitleChip: View {
             Canvas { g, sz in
                 let t = ctx.date.timeIntervalSince1970
                 for i in 0..<14 {
-                    let ph = t * (0.75 + Double(i % 5) * 0.26) + Double(i) * 1.37
-                    let a = (sin(ph) + 1) / 2
-                    let u = Double((i * 47) % 100) / 100.0
-                    let dx = (u - 0.5) * 2
-                    let edge = max(0, 1 - dx * dx).squareRoot()
-                    let x = sz.width * u
-                    let y = sz.height / 2 + (i % 2 == 0 ? -1 : 1) * (sz.height / 2) * (0.62 + edge * 0.42)
-                    let r = (0.9 + a * 2.1) * max(sz.height / 34, 0.6)
-                    let col = (i % 5 == 0)
-                        ? Color(red: 1.0, green: 0.90, blue: 0.70)
-                        : Color(red: 0.74, green: 0.55, blue: 1.0)
-                    g.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
-                           with: .color(col.opacity(0.05 + a * 0.8)))
-                    if i % 4 == 0 {
-                        let L = r * 3.0
-                        var cross = Path()
-                        cross.move(to: CGPoint(x: x - L, y: y))
-                        cross.addLine(to: CGPoint(x: x + L, y: y))
-                        cross.move(to: CGPoint(x: x, y: y - L * 0.66))
-                        cross.addLine(to: CGPoint(x: x, y: y + L * 0.66))
-                        g.stroke(cross,
-                                 with: .color(Color(red: 0.90, green: 0.80, blue: 1.0).opacity(0.10 + a * 0.6)),
-                                 lineWidth: max(0.6, sz.height / 52))
-                    }
+                    drawShard(g, sz: sz, t: t, i: i)
                 }
             }
         }
         .padding(-10 * size)
         .blendMode(.plusLighter)
         .allowsHitTesting(false)
+    }
+
+    /// 單顆紫晶（拆成獨立函式，避免複雜運算式拖垮型別推導）
+    private func drawShard(_ g: GraphicsContext, sz: CGSize, t: Double, i: Int) {
+        let ph: Double = t * (0.75 + Double(i % 5) * 0.26) + Double(i) * 1.37
+        let a: Double = (sin(ph) + 1) / 2
+        let u: Double = Double((i * 47) % 100) / 100.0
+        let dx: Double = (u - 0.5) * 2.0
+        let edge: Double = max(0.0, 1.0 - dx * dx).squareRoot()
+
+        let x: CGFloat = sz.width * CGFloat(u)
+        let mid: CGFloat = sz.height / 2
+        let sign: CGFloat = (i % 2 == 0) ? -1 : 1
+        let spread: CGFloat = 0.62 + CGFloat(edge) * 0.42
+        let y: CGFloat = mid + sign * mid * spread
+        let base: CGFloat = max(sz.height / 34, 0.6)
+        let r: CGFloat = (0.9 + CGFloat(a) * 2.1) * base
+
+        let col: Color = (i % 5 == 0)
+            ? Color(red: 1.0, green: 0.90, blue: 0.70)
+            : Color(red: 0.74, green: 0.55, blue: 1.0)
+        let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
+        g.fill(Path(ellipseIn: rect), with: .color(col.opacity(0.05 + a * 0.8)))
+
+        if i % 4 == 0 {
+            let L: CGFloat = r * 3.0
+            var cross = Path()
+            cross.move(to: CGPoint(x: x - L, y: y))
+            cross.addLine(to: CGPoint(x: x + L, y: y))
+            cross.move(to: CGPoint(x: x, y: y - L * 0.66))
+            cross.addLine(to: CGPoint(x: x, y: y + L * 0.66))
+            let glow = Color(red: 0.90, green: 0.80, blue: 1.0).opacity(0.10 + a * 0.6)
+            g.stroke(cross, with: .color(glow), lineWidth: max(0.6, sz.height / 52))
+        }
     }
 
     /// 深淵內緣：一道沿著膠囊流動的紫金光帶
