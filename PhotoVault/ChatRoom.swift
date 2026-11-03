@@ -245,6 +245,15 @@ struct ChatRoomView: View {
 
     /// 首次進場 / 手動刷新：抓最近 300 則（含首頁一次帶回），併進本機快取
     private func load() async {
+        // 先用本機快取把畫面填上，開聊天室不用先空等網路
+        let cached = ChatCache.shared.tail(shownLimit)
+        if !cached.isEmpty {
+            await MainActor.run {
+                messages = cached
+                loading = false
+            }
+        }
+
         let recent = await SocialAPI.loadChatRecent(token: store.authToken, limit: 300)
         let list: [ChatMessage]
         if recent.isEmpty {
