@@ -53,8 +53,8 @@ final class DriveAlertEngine: ObservableObject {
     @Published var voiceOn: Bool = DriveVoice.shared.enabled {
         didSet { DriveVoice.shared.enabled = voiceOn }
     }
-    /// 沒有實測速限的路段，是否用同級道路鄰近路段推定（預設開）
-    @Published var estimateOn: Bool = UserDefaults.standard.object(forKey: "driveEstimateOn") as? Bool ?? true {
+    /// 沒有實測速限的路段，是否用同級道路鄰近路段推定（預設關）
+    @Published var estimateOn: Bool = UserDefaults.standard.object(forKey: "driveEstimateOn") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(estimateOn, forKey: "driveEstimateOn")
             candidateAt = Date.distantPast
