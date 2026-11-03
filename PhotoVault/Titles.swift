@@ -250,8 +250,8 @@ struct TitleChip: View {
                     .frame(width: i == 0 ? 3.4 * size : 2.4 * size,
                            height: i == 0 ? 3.4 * size : 2.4 * size)
                     .shadow(color: title.glow, radius: 3 * size)
-                    .offset(x: (i % 2 == 0 ? 1 : -1) * (28 + CGFloat(i) * 7) * size,
-                            y: (i % 3 == 0 ? -1 : 1) * (5 + CGFloat(i % 3) * 3) * size)
+                    .offset(x: CGFloat(i % 2 == 0 ? 1 : -1) * (28 + CGFloat(i) * 7) * size,
+                            y: CGFloat(i % 3 == 0 ? -1 : 1) * (5 + CGFloat(i % 3) * 3) * size)
                     .opacity(0.75)
             }
         }

@@ -206,6 +206,11 @@ final class AppStore: ObservableObject {
             await SocialAPI.setLevel(userID: uid, level: finalLevel, token: token)
         }
 
+        // 後台贈與的稱號要真的寫進資料庫，不然下次就沒了
+        for k in newKeys {
+            await SocialAPI.grantTitle(userID: uid, key: k, source: "admin", token: token)
+        }
+
         await MainActor.run {
             level = finalLevel
             var list = titles

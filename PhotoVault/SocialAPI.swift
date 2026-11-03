@@ -46,9 +46,14 @@ struct PublicUser: Identifiable, Equatable {
     let titles: [String]
 }
 
+/// 非隔離的常數，避免跨 actor 取值
+enum PVConfig {
+    static let apiBase = "https://photovault-api.web.zaka.live"
+}
+
 enum SocialAPI {
 
-    static var base: String { AppStore.baseURL }
+    static var base: String { PVConfig.apiBase }
 
     // MARK: - 基礎請求
 
@@ -126,10 +131,10 @@ enum SocialAPI {
             return MemberLevel(rawValue: n) ?? .silver
         }
         // 建立：目前下載一律白銀
-        let seed = AppStore.defaultNewUserLevel.rawValue
+        let fallback = LaunchPhase.defaultLevel
         _ = try? await request("POST", "/api/collections/memberships/records",
-                               json: ["user": userID, "level": seed], token: token)
-        return AppStore.defaultNewUserLevel
+                               json: ["user": userID, "level": fallback.rawValue], token: token)
+        return fallback
     }
 
     // MARK: - 稱號
