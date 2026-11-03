@@ -221,6 +221,9 @@ struct HomeView: View {
     @EnvironmentObject var store: AppStore
     @State private var route: ToolRoute?
     @State private var appeared = false
+    @State private var showTasks = false
+    @State private var showChat = false
+    @State private var taskBadge = false
 
     private let groups: [ToolGroup] = ToolCatalog.homeGroups
 
@@ -253,8 +256,15 @@ struct HomeView: View {
             ToolDestinationView(route: r)
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showTasks) {
+            TasksView().environmentObject(store)
+        }
+        .sheet(isPresented: $showChat) {
+            ChatRoomView().environmentObject(store)
+        }
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
+            Task { await refreshTaskBadge() }
             LostModeManager.shared.configure(store: store)
             LocationBeacon.shared.ping { lat, lon, alt, acc, spd, crs, addr, place in
                 Task { @MainActor in
@@ -264,6 +274,16 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    private func refreshTaskBadge() async {
+        guard let uid = store.authUserID else { return }
+        let map = await SocialAPI.taskMap(userID: uid, token: store.authToken)
+        var any = false
+        for t in TaskDef.all {
+            if let (v, claimed) = map[t.key], v >= t.goal, !claimed { any = true; break }
+        }
+        await MainActor.run { taskBadge = any }
     }
 
     // MARK: 標題
@@ -295,6 +315,35 @@ struct HomeView: View {
                     .padding(.top, 1)
             }
             Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                Button { showTasks = true } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Color.white.opacity(0.055)))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
+                        if taskBadge {
+                            Circle().fill(TT.rose)
+                                .frame(width: 7, height: 7)
+                                .offset(x: 1, y: -1)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button { showChat = true } label: {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Color.white.opacity(0.055)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 8)

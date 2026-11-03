@@ -205,6 +205,7 @@ final class DriveAlertEngine: ObservableObject {
             if !fromInterval, saidLimit != v {
                 saidLimit = v
                 DriveVoice.shared.speak(DriveSpeech.limit(v))
+                NotificationCenter.default.post(name: .pvLimitSegment, object: nil)
             }
         } else {
             saidLimit = nil
@@ -419,4 +420,11 @@ final class DriveAlertEngine: ObservableObject {
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         }
     }
+}
+
+extension Notification.Name {
+    /// 進入一個新的限速路段（任務「測速達人」用）
+    static let pvLimitSegment = Notification.Name("pv.limit.segment")
+    /// 完成一次網路診斷（任務「診斷專家」用）
+    static let pvNetDiag = Notification.Name("pv.net.diag")
 }

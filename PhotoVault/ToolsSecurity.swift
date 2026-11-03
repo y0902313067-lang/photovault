@@ -1058,6 +1058,7 @@ struct QRScanView: View {
 
 struct PasswordCheckView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
     @State private var password = ""
     @State private var revealed = false
 
@@ -1217,6 +1218,10 @@ struct PasswordCheckView: View {
                     }
                 }
             }
+        }
+        .onChange(of: password) { _ in
+            let s = analysis.score
+            if s >= 81 { store.peakTask("pw", value: Double(s)) }
         }
     }
 

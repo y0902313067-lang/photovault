@@ -495,6 +495,7 @@ final class DecibelModel: ObservableObject {
 
 struct DecibelView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
     @StateObject private var model = DecibelModel()
 
     var body: some View {
@@ -520,6 +521,9 @@ struct DecibelView: View {
         }
         .onAppear { model.request() }
         .onDisappear { model.stop() }
+        .onReceive(model.$peak) { p in
+            if p >= 100 { store.peakTask("db", value: p) }
+        }
     }
 
     private var meterBlock: some View {

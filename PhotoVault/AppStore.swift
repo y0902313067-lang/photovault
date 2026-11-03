@@ -13,6 +13,17 @@ enum PVError: LocalizedError {
     }
 }
 
+/// 目前的下載階段：決定新用戶拿到哪個會員等級
+enum LaunchPhase {
+    #if APPSTORE
+    /// 上架 App Store 後：普通會員
+    static let defaultLevel: MemberLevel = .common
+    #else
+    /// 目前（官網 / 側載下載）：一律白銀
+    static let defaultLevel: MemberLevel = .silver
+    #endif
+}
+
 /// 本機裝置識別：只存在本機、不做任何跨 App 追蹤，只拿來在後台分辨是哪一台手機
 enum PVDevice {
     static var key: String {
@@ -75,6 +86,19 @@ final class AppStore: ObservableObject {
     /// 個人檔案頁換頭像後的小提示（nil = 不顯示）
     @Published var avatarToast: String?
 
+    // MARK: - 會員 / 稱號
+    /// 新下載預設等級：目前開放下載期間一律白銀；上架 App Store 後改成普通
+    static let defaultNewUserLevel: MemberLevel = LaunchPhase.defaultLevel
+
+    @Published var level: MemberLevel = LaunchPhase.defaultLevel
+    @Published var myTitles: [String] = []
+    @Published var pendingGrants: [PendingGrant] = []
+    @Published var rewardToast: String?          // 領到新東西時的彈窗內容
+
+    /// 給其他模組用的登入憑證
+    var authToken: String? { userToken }
+    var authUserID: String? { userID }
+
 
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -90,6 +114,13 @@ final class AppStore: ObservableObject {
         let d = UserDefaults.standard
         for k in ["pv_saved_count", "pv_synced", "pv_pending"] { d.removeObject(forKey: k) }
         d.synchronize()
+
+        NotificationCenter.default.addObserver(forName: .pvLimitSegment, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.bumpTask("speed", add: 1) }
+        }
+        NotificationCenter.default.addObserver(forName: .pvNetDiag, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.bumpTask("diag", add: 1) }
+        }
 
         guard let pid = d.string(forKey: "pv_profile_id"), !pid.isEmpty else {
             return   // 从未注册过，才进注册页
@@ -144,6 +175,114 @@ final class AppStore: ObservableObject {
         resetMode = false
         resetDone = false
         stage = .register
+        level = LaunchPhase.defaultLevel
+        myTitles = []
+        pendingGrants = []
+    }
+
+    // MARK: - 會員 / 稱號 / 贈與
+
+    /// 拉一次會員等級、稱號、待領取贈與。進主頁時調用即可。
+    func refreshSocial() async {
+        guard let uid = userID, let token = userToken else { return }
+        let lv = await SocialAPI.ensureMembership(userID: uid, token: token)
+        let titles = await SocialAPI.loadTitles(userID: uid, token: token)
+        let grants = await SocialAPI.loadGrants(userID: uid, token: token)
+
+        var finalLevel = lv
+        var newKeys: [String] = []
+
+        // 後台贈與：等級 / 稱號
+        for g in grants {
+            if g.kind == "title", let def = Titles.find(g.value) {
+                if !titles.contains(def.key) { newKeys.append(def.key) }
+            } else if g.kind == "level", let n = Int(g.value), let target = MemberLevel(rawValue: n) {
+                if target.rawValue > finalLevel.rawValue { finalLevel = target }
+            }
+            await SocialAPI.markGrantSeen(id: g.id, token: token)
+        }
+
+        if finalLevel != lv {
+            await SocialAPI.setLevel(userID: uid, level: finalLevel, token: token)
+        }
+
+        await MainActor.run {
+            level = finalLevel
+            var list = titles
+            for k in newKeys where !list.contains(k) { list.append(k) }
+            myTitles = list
+            pendingGrants = []
+            if let first = newKeys.first, let def = Titles.find(first) {
+                rewardToast = first
+                _ = def
+            } else if grants.contains(where: { $0.kind == "level" }) {
+                rewardToast = "level:\(finalLevel.rawValue)"
+            }
+        }
+    }
+
+    /// 領取任務獎勵
+    func claimTask(_ task: TaskDef) async {
+        guard let uid = userID, let token = userToken else { return }
+        guard !myTitles.contains(task.titleKey) else { return }
+        await SocialAPI.grantTitle(userID: uid, key: task.titleKey, source: "task", token: token)
+        await SocialAPI.markTaskClaimed(userID: uid, key: task.key, token: token)
+        await MainActor.run {
+            if !myTitles.contains(task.titleKey) { myTitles.append(task.titleKey) }
+            rewardToast = task.titleKey
+        }
+    }
+
+    /// 兌換碼
+    func redeem(_ code: String) async -> String? {
+        guard let uid = userID, let token = userToken else { return "請先登入" }
+        do {
+            let g = try await SocialAPI.redeem(code: code, userID: uid, token: token)
+            if g.kind == "title", let def = Titles.find(g.value) {
+                await MainActor.run {
+                    if !myTitles.contains(def.key) { myTitles.append(def.key) }
+                    rewardToast = def.key
+                }
+            } else if g.kind == "level", let n = Int(g.value), let lv = MemberLevel(rawValue: n) {
+                await MainActor.run {
+                    if lv.rawValue > level.rawValue { level = lv }
+                    rewardToast = "level:\(lv.rawValue)"
+                }
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// 改名字（只能在設定 → 編輯個人主頁裡用）
+    func changeNickname(_ newName: String) async -> String? {
+        let t = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return "名字不能空白" }
+        guard t.count <= 8 else { return "名字最多 8 個字" }
+        guard let token = userToken, let pid = profileID else { return "請先登入" }
+        do {
+            _ = try await send("PATCH", "/api/collections/profiles/records/\(pid)",
+                               json: ["nickname": t], token: token)
+            await MainActor.run {
+                nickname = t
+                persistSession()
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// 任務進度上報（給各工具模組調用）
+    func bumpTask(_ key: String, add: Double = 1) {
+        guard let uid = userID, let token = userToken else { return }
+        Task { await SocialAPI.bumpTask(userID: uid, key: key, add: add, token: token) }
+    }
+
+    func peakTask(_ key: String, value: Double) {
+        guard let uid = userID, let token = userToken else { return }
+        Task { await SocialAPI.setTaskPeak(userID: uid, key: key, value: value, token: token) }
     }
 
     // MARK: - 表單校驗（帳號、密碼都 6 位以上）

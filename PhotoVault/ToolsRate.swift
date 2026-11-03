@@ -214,6 +214,7 @@ final class RateModel: ObservableObject {
 // MARK: - 頁面
 
 struct RateView: View {
+    @EnvironmentObject private var store: AppStore
     @StateObject private var model = RateModel()
 
     @State private var amountText = "1000"
@@ -261,6 +262,7 @@ struct RateView: View {
         }
         .onAppear {
             if model.rates.isEmpty { model.load() }
+            store.bumpTask("fx", add: 1)
         }
         .sheet(isPresented: $showPicker) {
             currencyPicker

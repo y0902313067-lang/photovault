@@ -312,6 +312,7 @@ final class SpeedEngine: ObservableObject {
     }
 
     private func finish() {
+        NotificationCenter.default.post(name: .pvNetDiag, object: nil)
         phase = .done
         isRunning = false
         stageProgress = 1

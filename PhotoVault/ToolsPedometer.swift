@@ -163,6 +163,7 @@ final class PedometerModel: ObservableObject {
 // MARK: - 頁面
 
 struct PedometerView: View {
+    @EnvironmentObject private var store: AppStore
     @StateObject private var model = PedometerModel()
 
     private let accent = TT.amber
@@ -185,6 +186,9 @@ struct PedometerView: View {
                 weekBlock
                 noteBlock
             }
+        }
+        .onReceive(model.$distance) { km in
+            if km > 0 { store.peakTask("walk", value: km) }
         }
     }
 

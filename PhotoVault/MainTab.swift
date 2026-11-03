@@ -15,7 +15,7 @@ struct MainTabView: View {
                 .opacity(tab == 1 ? 1 : 0)
                 .allowsHitTesting(tab == 1)
 
-            ProfileView(embedded: true)
+            ProfilePageView(embedded: true)
                 .opacity(tab == 2 ? 1 : 0)
                 .allowsHitTesting(tab == 2)
 

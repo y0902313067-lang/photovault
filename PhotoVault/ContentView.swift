@@ -44,6 +44,12 @@ struct RootView: View {
             case .splash:    SplashView()
             case .home:      MainTabView()
             }
+
+            if let reward = store.rewardToast {
+                rewardLayer(reward)
+                    .transition(.opacity)
+                    .zIndex(50)
+            }
         }
         .keyboardDismissBar()
         .preferredColorScheme(.dark)
@@ -55,6 +61,17 @@ struct RootView: View {
         }
         .onReceive(beat) { _ in
             if scenePhase == .active { silentPing() }
+        }
+    }
+
+    @ViewBuilder
+    private func rewardLayer(_ reward: String) -> some View {
+        if reward.hasPrefix("level:"),
+           let n = Int(reward.dropFirst(6)),
+           let lv = MemberLevel(rawValue: n) {
+            RewardPopup(title: nil, level: lv) { store.rewardToast = nil }
+        } else if let def = Titles.find(reward) {
+            RewardPopup(title: def, level: nil) { store.rewardToast = nil }
         }
     }
 
