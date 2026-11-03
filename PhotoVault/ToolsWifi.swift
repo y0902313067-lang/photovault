@@ -59,7 +59,7 @@ final class WifiModel: ObservableObject {
         if snap.ssid == nil {
             return onWifi ? "已連線，但讀不到名稱（需定位權限）" : "未連上 Wi-Fi"
         }
-        guard let secure = snap.secure else { return "加密狀態未知，可手動標記" }
+        guard let secure = snap.secure else { return "加密方式：系統未提供" }
         return secure ? "已加密（需密碼）" : "開放網路（免密碼）"
     }
 
@@ -92,6 +92,15 @@ final class WifiModel: ObservableObject {
         dict[ssid] = secure
         UserDefaults.standard.set(dict, forKey: "md.wifi.manual")
         snap.secure = secure
+    }
+
+    /// 取消手動標記，回到「系統未提供」
+    func clearMark() {
+        guard let ssid = snap.ssid else { return }
+        var dict = UserDefaults.standard.dictionary(forKey: "md.wifi.manual") as? [String: Bool] ?? [:]
+        dict.removeValue(forKey: ssid)
+        UserDefaults.standard.set(dict, forKey: "md.wifi.manual")
+        snap.secure = nil
     }
 
     private func applyManualMark() {
@@ -169,7 +178,10 @@ final class WifiModel: ObservableObject {
             if let net = net {
                 s.ssid = net.ssid
                 s.bssid = net.bssid
-                s.secure = net.isSecure
+                // iOS 的 isSecure 只有「true」可信。回報 false 時多半是系統根本沒填值
+                // （實測：確實有密碼的網路也會回 false），所以一律當成「未提供」，
+                // 不拿 false 去斷定這是開放網路。
+                s.secure = net.isSecure ? true : nil
             }
             if s.ssid == nil, let interfaces = CNCopySupportedInterfaces() as? [String] {
                 for itf in interfaces {
@@ -313,30 +325,48 @@ struct WifiCheckView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if model.snap.secure == nil && model.snap.ssid != nil {
-                HStack(spacing: 9) {
-                    Text("這個網路要密碼嗎？")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.4))
-                    Spacer(minLength: 4)
-                    Button { model.mark(true) } label: {
-                        Text("要密碼")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(TT.mint)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(TT.mint.opacity(0.14)))
+            if model.snap.ssid != nil {
+                if model.snap.secure == nil {
+                    HStack(spacing: 9) {
+                        Text("這台手機自己記一次：")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.4))
+                        Spacer(minLength: 4)
+                        Button { model.mark(true) } label: {
+                            Text("要密碼")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(TT.mint)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(TT.mint.opacity(0.14)))
+                        }
+                        .buttonStyle(.plain)
+                        Button { model.mark(false) } label: {
+                            Text("免密碼")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(TT.rose)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(TT.rose.opacity(0.14)))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    Button { model.mark(false) } label: {
-                        Text("免密碼")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(TT.rose)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(TT.rose.opacity(0.14)))
+                } else {
+                    HStack(spacing: 9) {
+                        Text(model.snap.secure == true ? "你標的是「要密碼」" : "你標的是「免密碼」")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.4))
+                        Spacer(minLength: 4)
+                        Button { model.clearMark() } label: {
+                            Text("重設")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.55))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Color.white.opacity(0.07)))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -494,7 +524,7 @@ struct WifiCheckView: View {
                 TTKeyRow(key: "網路名稱", value: model.snap.ssid ?? "—", accent: TT.blue)
                 Divider().background(Color.white.opacity(0.06))
                 TTKeyRow(key: "加密狀態",
-                         value: model.snap.secure == nil ? "—" : (model.snap.secure! ? "已加密" : "開放"),
+                         value: model.snap.secure == nil ? "系統未提供" : (model.snap.secure! ? "已加密" : "開放"),
                          accent: TT.blue)
                 Divider().background(Color.white.opacity(0.06))
                 TTKeyRow(key: "路由器 BSSID", value: mask(model.snap.bssid), accent: TT.blue, mono: true)
@@ -562,7 +592,7 @@ struct WifiCheckView: View {
         TTPanel(accent: TT.violet) {
             VStack(alignment: .leading, spacing: 10) {
                 TTSectionTitle(text: "這個頁面測什麼", accent: TT.violet)
-                Text("只測你目前連著的那一個網路：名稱、有沒有加密、連不連得出去、要不要先登入、往返延遲。\n\n兩件 iOS 不給的事先講清楚，免得誤會：\n• 不能列出附近有哪些熱點。系統沒有這個介面，任何 App 都一樣。\n• 不能細分 WPA2 / WPA3 / WEP。系統只回報「有沒有加密」；顯示「未知」時，可以用卡片上的「要密碼／免密碼」手動標記一次，這台手機之後會記住。")
+                Text("只測你目前連著的那一個網路：名稱、加密方式、連不連得出去、要不要先登入、往返延遲。\n\n兩件 iOS 不給的事先講清楚，免得誤會：\n• 不能列出附近有哪些熱點。系統沒有這個介面，任何 App 都一樣。\n• 不給加密方式。iOS 沒有讀 WPA2／WPA3 的介面，而它回報的「有沒有加密」經常是空的——明明要密碼的網路也會回成 false。所以這一頁不拿那個值去斷定開放或加密，一律顯示「系統未提供」；要準確的話，用卡片上的「要密碼／免密碼」標一次，這台手機之後就記住了，按「重設」可以清掉。")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.45))
                     .fixedSize(horizontal: false, vertical: true)
