@@ -58,11 +58,15 @@ extension ChatMessage {
     }
 
     static func composeText(body: String, replyTo: (nick: String, quote: String)?) -> String {
-        guard let r = replyTo else { return body }
+        // 後端 text 上限 1000 字，引用行佔的空間要從正文扣掉
+        let limit = 1000
+        guard let r = replyTo else { return String(body.prefix(limit)) }
         let nick = String(r.nick.prefix(12))
         let flat = r.quote.replacingOccurrences(of: "\n", with: " ")
         let quote = String(flat.prefix(40))
-        return "⟦回覆 \(nick)：\(quote)⟧\n" + body
+        let head = "⟦回覆 \(nick)：\(quote)⟧\n"
+        let room = max(0, limit - head.count)
+        return head + String(body.prefix(room))
     }
 }
 
