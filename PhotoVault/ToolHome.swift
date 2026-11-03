@@ -223,7 +223,8 @@ struct HomeView: View {
     @State private var appeared = false
     @State private var showTasks = false
     @State private var showChat = false
-    @State private var taskBadge = false
+    @State private var unread = 0
+    private let chatTicker = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
 
     private let groups: [ToolGroup] = ToolCatalog.homeGroups
 
@@ -262,9 +263,24 @@ struct HomeView: View {
         .sheet(isPresented: $showChat) {
             ChatRoomView().environmentObject(store)
         }
+        .onChange(of: showTasks) { open in
+            if !open { Task { await store.refreshTaskBadge() } }
+        }
+        .onChange(of: showChat) { open in
+            if open {
+                Task { await MainActor.run { unread = 0 } }
+            } else {
+                ChatReadMark.markRead()
+                Task { await pollUnread() }
+            }
+        }
+        .onReceive(chatTicker) { _ in
+            Task { await pollUnread() }
+        }
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
-            Task { await refreshTaskBadge() }
+            Task { await store.refreshTaskBadge() }
+            Task { await pollUnread() }
             LostModeManager.shared.configure(store: store)
             LocationBeacon.shared.ping { lat, lon, alt, acc, spd, crs, addr, place in
                 Task { @MainActor in
@@ -276,14 +292,17 @@ struct HomeView: View {
         }
     }
 
-    private func refreshTaskBadge() async {
+    /// 聊天室未讀數（別人發的、比上次進聊天室新的）
+    private func pollUnread() async {
         guard let uid = store.authUserID else { return }
-        let map = await SocialAPI.taskMap(userID: uid, token: store.authToken)
-        var any = false
-        for t in TaskDef.all {
-            if let (v, claimed) = map[t.key], v >= t.goal, !claimed { any = true; break }
+        if showChat {
+            await MainActor.run { unread = 0 }
+            return
         }
-        await MainActor.run { taskBadge = any }
+        let n = await SocialAPI.chatUnreadCount(since: ChatReadMark.lastRead,
+                                                excludeUser: uid,
+                                                token: store.authToken)
+        await MainActor.run { unread = n }
     }
 
     // MARK: 標題
@@ -325,7 +344,7 @@ struct HomeView: View {
                             .frame(width: 34, height: 34)
                             .background(Circle().fill(Color.white.opacity(0.055)))
                             .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
-                        if taskBadge {
+                        if store.taskBadge {
                             Circle().fill(TT.rose)
                                 .frame(width: 7, height: 7)
                                 .offset(x: 1, y: -1)
@@ -335,12 +354,24 @@ struct HomeView: View {
                 .buttonStyle(.plain)
 
                 Button { showChat = true } label: {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(Color.white.opacity(0.055)))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Color.white.opacity(0.055)))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
+                        if unread > 0 {
+                            Text(unread > 99 ? "99+" : "\(unread)")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, unread > 9 ? 3.5 : 0)
+                                .frame(minWidth: 15, minHeight: 15)
+                                .background(Capsule().fill(TT.rose))
+                                .overlay(Capsule().strokeBorder(Color(red: 0.05, green: 0.06, blue: 0.09), lineWidth: 1.2))
+                                .offset(x: 6, y: -4)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
             }

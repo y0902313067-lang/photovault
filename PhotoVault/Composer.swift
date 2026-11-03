@@ -82,7 +82,7 @@ struct ComposerView: View {
                     }
 
                     HStack(spacing: 10) {
-                        PhotosPicker(selection: $picked, maxSelectionCount: 4, matching: .images) {
+                        PhotosPicker(selection: $picked, maxSelectionCount: 9, matching: .images) {
                             toolChip(icon: "photo", label: "照片")
                         }
                         PhotosPicker(selection: $videoItem, matching: .videos) {
@@ -97,7 +97,7 @@ struct ComposerView: View {
                             .foregroundStyle(TT.rose)
                     }
 
-                    Text("發佈後所有人都能在你的主頁看到。最多 4 張照片，或一支影片。")
+                    Text("發佈後所有人都能在你的主頁看到。最多 9 張照片，或一支影片。")
                         .font(.system(size: 10.5))
                         .foregroundStyle(.white.opacity(0.28))
 
@@ -136,7 +136,7 @@ struct ComposerView: View {
             .onChange(of: picked) { list in
                 Task {
                     var out: [UIImage] = []
-                    for item in list.prefix(4) {
+                    for item in list.prefix(9) {
                         if let d = try? await item.loadTransferable(type: Data.self),
                            let img = UIImage(data: d) {
                             out.append(img)

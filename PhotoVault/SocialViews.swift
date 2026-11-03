@@ -97,7 +97,7 @@ struct TasksView: View {
 
     private func taskRow(_ t: TaskDef) -> some View {
         let (value, claimed) = progress[t.key] ?? (0, false)
-        let owned = store.myTitles.contains(t.titleKey)
+        let owned = store.myTitles.contains(t.titleKey) || store.isTaskClaimedLocally(t.key)
         let done = value >= t.goal
         let pct = min(1.0, t.goal <= 0 ? 1 : value / t.goal)
 

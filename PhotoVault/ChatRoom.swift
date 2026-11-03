@@ -97,7 +97,8 @@ struct ChatRoomView: View {
                     Text(m.nickname)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.55))
-                    LevelTagInline(level: m.level)
+                    // 自己發的那條用本機目前等級，避免伺服器留有舊記錄時少顯示一階
+                    LevelTagInline(level: mine ? store.level : m.level)
                 }
                 .frame(maxWidth: mine ? .infinity : nil,
                        alignment: mine ? .trailing : .leading)
@@ -236,18 +237,37 @@ struct ChatRoomView: View {
 
     // MARK: 資料
 
+    /// 首次進場 / 手動刷新：抓最近 300 則（含首頁一次帶回），併進本機快取
     private func load() async {
-        let list = await SocialAPI.loadChat(token: store.authToken)
+        let recent = await SocialAPI.loadChatRecent(token: store.authToken, limit: 300)
+        let list: [ChatMessage]
+        if recent.isEmpty {
+            // 離線：只顯示本機最近的 300 則
+            list = ChatCache.shared.offlineTail
+        } else {
+            list = ChatCache.shared.merge(recent)
+        }
         await MainActor.run {
-            messages = list
+            messages = Array(list.suffix(ChatCache.diskLimit))
             loading = false
+        }
+    }
+
+    /// 輪詢：只抓比最後一條更新的，併進快取
+    private func poll() async {
+        let since = messages.last?.created ?? Date(timeIntervalSince1970: 0)
+        let fresh = await SocialAPI.loadChatSince(since, token: store.authToken, limit: 200)
+        guard !fresh.isEmpty else { return }
+        let merged = ChatCache.shared.merge(fresh)
+        await MainActor.run {
+            messages = Array(merged.suffix(ChatCache.diskLimit))
         }
     }
 
     private func startPolling() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { _ in
-            Task { await load() }
+            Task { await poll() }
         }
     }
 

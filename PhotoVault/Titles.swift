@@ -183,27 +183,23 @@ struct TitleChip: View {
 
     @State private var sweeping = false
     @State private var spin: Double = 0
+    @State private var blink = false
 
-    private var h: CGFloat { 26 * size }
-    private var icon: CGFloat { 16 * size }
+    private var h: CGFloat { 30 * size }
+    private var icon: CGFloat { 18.5 * size }
 
     var body: some View {
-        HStack(spacing: 5 * size) {
+        HStack(spacing: 6 * size) {
             Image(title.image)
                 .resizable()
                 .interpolation(.high)
                 .scaledToFit()
                 .frame(width: icon, height: icon)
 
-            Text(title.name)
-                .font(.system(size: 11.5 * size, weight: .heavy))
-                .foregroundStyle(textColor)
-                .lineLimit(1)
-                .fixedSize()
-                .shadow(color: title.glow.opacity(title.tier >= 2 ? 0.9 : 0.45), radius: 3 * size)
+            nameLabel
         }
-        .padding(.leading, 6 * size)
-        .padding(.trailing, 11 * size)
+        .padding(.leading, 7 * size)
+        .padding(.trailing, 12 * size)
         .frame(height: h)
         .background(
             Capsule().fill(LinearGradient(colors: title.colors,
@@ -220,9 +216,13 @@ struct TitleChip: View {
         .overlay(sheen)
         .overlay(alignment: .topLeading) { sweepLayer }
         .overlay(alignment: .topLeading) { if title.tier >= 5 { backSweepLayer } }
+        .overlay { if title.tier >= 6 { abyssStream } }
         .overlay { if title.tier >= 3 { starField } }
+        .overlay { if title.tier >= 6 { obsidianSparkle } }
         .clipShape(Capsule())
+        .overlay { if title.tier >= 6 { obsidianShards } }
         .overlay { if title.tier >= 4 { outerRing } }
+        .overlay { if title.tier >= 6 { abyssHalo } }
         .shadow(color: title.glow.opacity(shadowOpacity), radius: shadowRadius)
         .shadow(color: title.glow.opacity(shadowOpacity * 0.55), radius: shadowRadius * 2.1)
         .fixedSize()
@@ -233,6 +233,10 @@ struct TitleChip: View {
             if title.tier >= 3 {
                 withAnimation(.linear(duration: title.tier >= 6 ? 14 : 20)
                     .repeatForever(autoreverses: false)) { spin = 360 }
+            }
+            if title.tier >= 6 {
+                withAnimation(.easeInOut(duration: 1.15)
+                    .repeatForever(autoreverses: true)) { blink = true }
             }
         }
     }
@@ -246,6 +250,143 @@ struct TitleChip: View {
         case 5:    return 2.5
         default:   return 2.0
         }
+    }
+
+    /// 稱號文字：普通是素色，深淵王爵跟著圖標一起跑紫金漸層
+    @ViewBuilder
+    private var nameLabel: some View {
+        if title.tier >= 6 {
+            Text(title.name)
+                .font(.system(size: 13 * size, weight: .heavy))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color(red: 1.0, green: 0.96, blue: 1.0),
+                                 Color(red: 0.86, green: 0.70, blue: 1.0),
+                                 Color(red: 0.56, green: 0.34, blue: 0.98),
+                                 Color(red: 0.80, green: 0.60, blue: 1.0),
+                                 Color(red: 1.0, green: 0.92, blue: 0.74)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .lineLimit(1)
+                .fixedSize()
+                .shadow(color: Color(red: 0.60, green: 0.40, blue: 1.0).opacity(blink ? 1.0 : 0.62),
+                        radius: (blink ? 7 : 4.5) * size)
+                .shadow(color: Color(red: 0.92, green: 0.80, blue: 1.0).opacity(blink ? 0.55 : 0.25),
+                        radius: 1.6 * size)
+        } else {
+            Text(title.name)
+                .font(.system(size: 13 * size, weight: .heavy))
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+                .fixedSize()
+                .shadow(color: title.glow.opacity(title.tier >= 2 ? 0.9 : 0.45), radius: 3 * size)
+        }
+    }
+
+    /// 黑曜石面上的紫晶碎點，一閃一閃
+    private var obsidianSparkle: some View {
+        TimelineView(.animation) { ctx in
+            Canvas { g, size in
+                let t = ctx.date.timeIntervalSince1970
+                for i in 0..<16 {
+                    let ph = t * (1.05 + Double(i % 5) * 0.22) + Double(i) * 1.63
+                    let a = (sin(ph) + 1) / 2
+                    let fx = 0.08 + Double((i * 37) % 86) / 100.0
+                    let fy = 0.12 + Double((i * 61) % 74) / 100.0
+                    let x = size.width * fx
+                    let y = size.height * fy
+                    let r = (0.5 + a * 1.45) * max(size.height / 30, 0.7)
+                    // 紫晶 / 淡金兩色交替，像黑曜石面上碎掉的晶面
+                    let col = (i % 3 == 0)
+                        ? Color(red: 1.0, green: 0.88, blue: 0.66)
+                        : Color(red: 0.78, green: 0.62, blue: 1.0)
+                    g.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                           with: .color(col.opacity(0.08 + a * 0.85)))
+                    if i % 4 == 0 && a > 0.55 {
+                        let L = r * 3.4
+                        var cross = Path()
+                        cross.move(to: CGPoint(x: x - L, y: y))
+                        cross.addLine(to: CGPoint(x: x + L, y: y))
+                        cross.move(to: CGPoint(x: x, y: y - L * 0.62))
+                        cross.addLine(to: CGPoint(x: x, y: y + L * 0.62))
+                        g.stroke(cross,
+                                 with: .color(col.opacity((a - 0.55) * 1.5)),
+                                 lineWidth: max(0.6, size.height / 60))
+                    }
+                }
+            }
+        }
+        .blendMode(.plusLighter)
+        .allowsHitTesting(false)
+    }
+
+    /// 深淵外側：沿著膠囊邊緣漂浮的小紫晶，一閃一閃（畫在裁切之外，看起來像散在旁邊）
+    private var obsidianShards: some View {
+        TimelineView(.animation) { ctx in
+            Canvas { g, sz in
+                let t = ctx.date.timeIntervalSince1970
+                for i in 0..<14 {
+                    let ph = t * (0.75 + Double(i % 5) * 0.26) + Double(i) * 1.37
+                    let a = (sin(ph) + 1) / 2
+                    let u = Double((i * 47) % 100) / 100.0
+                    let dx = (u - 0.5) * 2
+                    let edge = max(0, 1 - dx * dx).squareRoot()
+                    let x = sz.width * u
+                    let y = sz.height / 2 + (i % 2 == 0 ? -1 : 1) * (sz.height / 2) * (0.62 + edge * 0.42)
+                    let r = (0.9 + a * 2.1) * max(sz.height / 34, 0.6)
+                    let col = (i % 5 == 0)
+                        ? Color(red: 1.0, green: 0.90, blue: 0.70)
+                        : Color(red: 0.74, green: 0.55, blue: 1.0)
+                    g.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                           with: .color(col.opacity(0.05 + a * 0.8)))
+                    if i % 4 == 0 {
+                        let L = r * 3.0
+                        var cross = Path()
+                        cross.move(to: CGPoint(x: x - L, y: y))
+                        cross.addLine(to: CGPoint(x: x + L, y: y))
+                        cross.move(to: CGPoint(x: x, y: y - L * 0.66))
+                        cross.addLine(to: CGPoint(x: x, y: y + L * 0.66))
+                        g.stroke(cross,
+                                 with: .color(Color(red: 0.90, green: 0.80, blue: 1.0).opacity(0.10 + a * 0.6)),
+                                 lineWidth: max(0.6, sz.height / 52))
+                    }
+                }
+            }
+        }
+        .padding(-10 * size)
+        .blendMode(.plusLighter)
+        .allowsHitTesting(false)
+    }
+
+    /// 深淵內緣：一道沿著膠囊流動的紫金光帶
+    private var abyssStream: some View {
+        GeometryReader { geo in
+            Capsule()
+                .strokeBorder(
+                    LinearGradient(colors: [.clear,
+                                            Color(red: 0.92, green: 0.82, blue: 1.0).opacity(0.95),
+                                            Color(red: 1.0, green: 0.90, blue: 0.70).opacity(0.75),
+                                            .clear],
+                                   startPoint: .leading, endPoint: .trailing),
+                    lineWidth: 1.7 * size)
+                .blur(radius: 1.0 * size)
+                .offset(x: sweeping ? geo.size.width * 0.7 : -geo.size.width * 0.7)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// 深淵外圈：紫光呼吸
+    private var abyssHalo: some View {
+        Capsule()
+            .strokeBorder(
+                LinearGradient(colors: [Color(red: 0.72, green: 0.52, blue: 1.0).opacity(blink ? 0.95 : 0.35),
+                                        Color(red: 0.40, green: 0.22, blue: 0.78).opacity(blink ? 0.5 : 0.15),
+                                        Color(red: 0.80, green: 0.62, blue: 1.0).opacity(blink ? 0.9 : 0.3)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                lineWidth: 1.15 * size)
+            .blur(radius: 0.6 * size)
+            .scaleEffect(blink ? 1.06 : 1.0)
+            .allowsHitTesting(false)
     }
 
     private var textColor: Color {
@@ -364,24 +505,70 @@ struct TitleChip: View {
     }
 }
 
-// MARK: - 稱號九宮格
+// MARK: - 稱號展示（無框、無上限、自動換行）
 
-struct TitleGrid: View {
+struct TitleFlow: View {
     let owned: [String]
+    var size: CGFloat = 1.0
+    var spacing: CGFloat = 3
 
     private var list: [TitleDef] {
         owned.compactMap { Titles.find($0) }
-            .sorted { (Titles.order[$0.key] ?? 99) < (Titles.order[$1.key] ?? 99) }
     }
 
     var body: some View {
-        let cols = Array(repeating: GridItem(.flexible(), spacing: 6, alignment: .leading),
-                         count: 3)
-        LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
-            ForEach(list.prefix(12)) { t in
-                TitleChip(title: t, size: 0.82)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        FlowLayout(spacing: spacing, lineSpacing: spacing) {
+            ForEach(list) { t in
+                TitleChip(title: t, size: size)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 由左到右排、排不下就換行
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var lineH: CGFloat = 0
+        var widest: CGFloat = 0
+        for sv in subviews {
+            let s = sv.sizeThatFits(.unspecified)
+            if x > 0 && x + s.width > maxW {
+                y += lineH + lineSpacing
+                x = 0
+                lineH = 0
+            }
+            x += s.width + spacing
+            widest = max(widest, x - spacing)
+            lineH = max(lineH, s.height)
+        }
+        return CGSize(width: proposal.width ?? widest, height: y + lineH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineH: CGFloat = 0
+        for sv in subviews {
+            let s = sv.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + s.width > bounds.maxX {
+                y += lineH + lineSpacing
+                x = bounds.minX
+                lineH = 0
+            }
+            sv.place(at: CGPoint(x: x, y: y), anchor: .topLeading,
+                     proposal: ProposedViewSize(width: s.width, height: s.height))
+            x += s.width + spacing
+            lineH = max(lineH, s.height)
         }
     }
 }
+
+/// 舊名字保留，避免其他地方引用不到
+typealias TitleGrid = TitleFlow

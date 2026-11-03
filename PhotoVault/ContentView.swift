@@ -744,7 +744,6 @@ struct ProfileView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @State private var showLogout = false
     @State private var perms: [AppPerm: PermState] = [:]
     @State private var locRequester: CLLocationManager?
     @State private var motionRequester: CMMotionActivityManager?
@@ -768,33 +767,6 @@ struct ProfileView: View {
                         }
                     }
                     .frame(width: 132, height: 132)
-                    .overlay(alignment: .bottomTrailing) {
-                        Button {
-                            showAvatarPicker = true
-                        } label: {
-                            ZStack {
-                                Circle().fill(Brand.mint)
-                                if store.avatarUploading {
-                                    ProgressView()
-                                        .progressViewStyle(.circular)
-                                        .tint(Color(red: 0.02, green: 0.10, blue: 0.09))
-                                        .scaleEffect(0.7)
-                                } else {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 16, weight: .heavy))
-                                        .foregroundStyle(Color(red: 0.02, green: 0.10, blue: 0.09))
-                                }
-                            }
-                            .frame(width: 38, height: 38)
-                            .overlay(
-                                Circle().strokeBorder(Color(red: 0.05, green: 0.07, blue: 0.13), lineWidth: 3)
-                            )
-                            .shadow(color: Brand.mint.opacity(0.45), radius: 9)
-                        }
-                        .buttonStyle(.plain)
-                        .offset(x: 2, y: 2)
-                        .accessibilityLabel("更換頭像")
-                    }
                     .padding(.top, 12)
 
                     VStack(spacing: 4) {
@@ -832,72 +804,6 @@ struct ProfileView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 26)
 
-                    Button {
-                        if let url = URL(string: "https://lin.ee/TYSCkcO") { openURL(url) }
-                    } label: {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                Circle().fill(Brand.mint.opacity(0.14))
-                                Circle().strokeBorder(Brand.mint.opacity(0.35), lineWidth: 0.8)
-                                Image(systemName: "bubble.left.and.bubble.right.fill")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(Brand.mint)
-                            }
-                            .frame(width: 32, height: 32)
-
-                            VStack(alignment: .leading, spacing: 1.5) {
-                                Text("聯繫客服")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.95))
-                                Text("遇到問題或有建議，直接找我們")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.4))
-                            }
-
-                            Spacer(minLength: 6)
-
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.3))
-                        }
-                        .padding(.horizontal, 14)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 58)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color.white.opacity(0.05))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(Brand.mint.opacity(0.22), lineWidth: 0.8)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 18)
-
-                    Button {
-                        showLogout = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("登出這個帳號")
-                        }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.5))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color.white.opacity(0.05))
-                        )
-                    }
-                    .padding(.horizontal, 18)
-
-                    Text("登出後要重新註冊；只要不登出、不刪除 App，下次打開都會直接進主頁。")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
 
                     Spacer(minLength: 30)
                 }
@@ -928,17 +834,6 @@ struct ProfileView: View {
         }
         .onAppear { refreshPermissions() }
         .onChange(of: profileScene) { _ in refreshPermissions() }
-        .alert("確定登出？", isPresented: $showLogout) {
-            Button("登出", role: .destructive) {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    store.logout()
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("登出後會回到註冊頁。")
-        }
     }
 
     private func row(_ k: String, _ v: String) -> some View {

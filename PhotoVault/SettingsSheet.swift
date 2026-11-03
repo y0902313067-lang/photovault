@@ -5,10 +5,12 @@ import SwiftUI
 struct SettingsSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @State private var openEdit = false
     @State private var openAccount = false
     @State private var openRedeem = false
+    @State private var showLogout = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +25,45 @@ struct SettingsSheet: View {
                     sub: "權限與帳號資訊") { openAccount = true }
                 row(icon: "ticket", title: "兌換碼",
                     sub: "輸入兌換碼領取稱號或會員等級") { openRedeem = true }
+                row(icon: "bubble.left.and.bubble.right.fill", title: "聯繫客服",
+                    sub: "遇到問題或有建議，直接找我們") {
+                    if let url = URL(string: "https://lin.ee/TYSCkcO") { openURL(url) }
+                }
+
+                Button {
+                    showLogout = true
+                } label: {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(red: 1.0, green: 0.45, blue: 0.5).opacity(0.14))
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.5))
+                        }
+                        .frame(width: 34, height: 34)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("登出帳號")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.5))
+                            Text("登出後要重新註冊才能再用")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.32))
+                        }
+                        Spacer(minLength: 4)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 62)
+                    .background(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .fill(Color(red: 1.0, green: 0.45, blue: 0.5).opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .strokeBorder(Color(red: 1.0, green: 0.45, blue: 0.5).opacity(0.16), lineWidth: 0.8)
+                    )
+                }
+                .buttonStyle(.plain)
 
                 Spacer(minLength: 10)
             }
@@ -42,6 +83,17 @@ struct SettingsSheet: View {
         }
         .sheet(isPresented: $openAccount) { AccountStatusView() }
         .presentationDetents([.medium, .large])
+        .alert("確定要登出？", isPresented: $showLogout) {
+            Button("登出", role: .destructive) {
+                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    store.logout()
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("登出後會回到註冊頁，資料不會保留在手機上。")
+        }
     }
 
     private func row(icon: String, title: String, sub: String, action: @escaping () -> Void) -> some View {

@@ -117,6 +117,30 @@ struct PostCard: View {
                 }
             }
 
+            if !showAuthor {
+                HStack(spacing: 8) {
+                    Text(shortTime(post.created))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Spacer(minLength: 4)
+                    if let onDelete {
+                        Button {
+                            onDelete()
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(TT.rose.opacity(0.85))
+                                .frame(width: 30, height: 26)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color.white.opacity(0.05))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
             if !post.text.isEmpty {
                 Text(post.text)
                     .font(.system(size: 14))
@@ -155,30 +179,71 @@ struct PostCard: View {
 
 struct PostImages: View {
     let post: FeedPost
+    @State private var viewerIndex: Int? = nil
+
+    /// 依張數決定每行幾格
+    private static func columns(for n: Int) -> Int {
+        switch n {
+        case 1: return 1
+        case 2: return 2
+        case 4: return 2
+        case 8: return 4
+        default: return 3
+        }
+    }
+
+    private var urls: [URL] {
+        post.images.compactMap { SocialAPI.fileURL(collection: "posts", record: post.id, file: $0) }
+    }
 
     var body: some View {
-        let cols = post.images.count == 1
-            ? [GridItem(.flexible())]
-            : [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)]
-        LazyVGrid(columns: cols, spacing: 6) {
-            ForEach(post.images, id: \.self) { name in
-                if let url = SocialAPI.fileURL(collection: "posts", record: post.id, file: name) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        default:
-                            ZStack {
-                                Color.white.opacity(0.05)
-                                ProgressView().tint(.white.opacity(0.4))
-                            }
-                        }
-                    }
-                    .frame(height: post.images.count == 1 ? 220 : 130)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        let n = post.images.count
+        let cols = Self.columns(for: n)
+        let grid = Array(repeating: GridItem(.flexible(), spacing: 5), count: cols)
+        let pad = (cols - n % cols) % cols
+
+        LazyVGrid(columns: grid, spacing: 5) {
+            ForEach(Array(post.images.enumerated()), id: \.offset) { idx, name in
+                cell(name: name, index: idx)
+            }
+            if pad > 0 {
+                ForEach(0..<pad, id: \.self) { _ in
+                    Color.clear
+                        .aspectRatio(1, contentMode: .fit)
                 }
             }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { viewerIndex != nil },
+            set: { if !$0 { viewerIndex = nil } }
+        )) {
+            PhotoViewer(urls: urls, start: viewerIndex ?? 0)
+        }
+    }
+
+    @ViewBuilder
+    private func cell(name: String, index: Int) -> some View {
+        if let url = SocialAPI.fileURL(collection: "posts", record: post.id, file: name) {
+            Button {
+                viewerIndex = index
+            } label: {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                    default:
+                        ZStack {
+                            Color.white.opacity(0.05)
+                            ProgressView().tint(.white.opacity(0.4))
+                        }
+                    }
+                }
+                .aspectRatio(1, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -303,6 +368,8 @@ struct ProfilePageView: View {
     @State private var showSettings = false
     @State private var showLevelInfo = false
     @State private var showComposer = false
+    @State private var showTitleEditor = false
+    @StateObject private var titleLayout = TitleLayoutStore()
     @State private var posts: [FeedPost] = []
     @State private var other: PublicUser?
     @State private var loading = true
@@ -376,6 +443,9 @@ struct ProfilePageView: View {
             .sheet(isPresented: $showComposer) {
                 ComposerView { await reload() }
             }
+            .sheet(isPresented: $showTitleEditor) {
+                TitleLayoutEditor(owned: shownTitles, layout: titleLayout)
+            }
             .task { await reload() }
             .onReceive(ticker) { _ in
                 guard isMe else { return }
@@ -433,28 +503,41 @@ struct ProfilePageView: View {
     }
 
     private var titleBox: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
                 Text("稱號")
                     .font(.system(size: 10.5, weight: .bold))
                     .foregroundStyle(.white.opacity(0.35))
                     .tracking(1.6)
                 Spacer()
-                Text("\(min(shownTitles.count, 9)) / 9")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.25))
+                if isMe {
+                    Button { showTitleEditor = true } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("編排")
+                                .font(.system(size: 10.5, weight: .semibold))
+                        }
+                        .foregroundStyle(TT.mint.opacity(0.9))
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background(
+                            Capsule().fill(Color.white.opacity(0.055))
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(TT.mint.opacity(0.22), lineWidth: 0.7)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            TitleGrid(owned: shownTitles)
+            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 4)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.8)
-        )
+        .padding(.horizontal, 2)
+    }
+
+    private var visibleTitles: [String] {
+        isMe ? titleLayout.visible(shownTitles) : shownTitles
     }
 
     private var composeBar: some View {
@@ -469,7 +552,9 @@ struct ProfilePageView: View {
                 Spacer()
             }
             .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity)
             .frame(height: 44)
+            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .fill(Color.white.opacity(0.05))

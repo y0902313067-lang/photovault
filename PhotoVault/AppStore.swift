@@ -94,6 +94,7 @@ final class AppStore: ObservableObject {
     @Published var myTitles: [String] = []
     @Published var pendingGrants: [PendingGrant] = []
     @Published var rewardToast: String?          // 領到新東西時的彈窗內容
+    @Published var taskBadge: Bool = false       // 工具箱上的任務紅點
 
     /// 給其他模組用的登入憑證
     var authToken: String? { userToken }
@@ -146,12 +147,15 @@ final class AppStore: ObservableObject {
     func logout() {
         let d = UserDefaults.standard
         for k in ["pv_profile_id", "pv_nickname", "pv_account", "pv_email", "pv_token", "pv_uid",
-                  "pv_saved_count", "pv_synced", "pv_pending"] {
+                  "pv_saved_count", "pv_synced", "pv_pending",
+                  "pv.chat.lastRead.v1", "pv.titles.order.v1", "pv.titles.hidden.v1",
+                  "pv.tasks.claimed.v1"] {
             d.removeObject(forKey: k)
         }
         d.synchronize()
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("pv_avatar.jpg"))
+        ChatCache.shared.clear()
         profileID = nil
         nickname = ""
         account = ""
@@ -219,16 +223,56 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: 任務「已領取」本機備份（伺服器寫入萬一失敗，紅點也不會一直亮）
+
+    private static let taskClaimedKey = "pv.tasks.claimed.v1"
+
+    private var localClaimedKeys: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.taskClaimedKey) ?? [])
+    }
+
+    func isTaskClaimedLocally(_ key: String) -> Bool {
+        localClaimedKeys.contains(key)
+    }
+
+    private func markTaskClaimedLocally(_ key: String) {
+        var s = localClaimedKeys
+        s.insert(key)
+        UserDefaults.standard.set(Array(s), forKey: Self.taskClaimedKey)
+    }
+
     /// 領取任務獎勵
     func claimTask(_ task: TaskDef) async {
         guard let uid = userID, let token = userToken else { return }
-        guard !myTitles.contains(task.titleKey) else { return }
-        await SocialAPI.grantTitle(userID: uid, key: task.titleKey, source: "task", token: token)
+        markTaskClaimedLocally(task.key)
+        // 先標記已領，避免「本來就有這個稱號」時任務永遠亮紅點
         await SocialAPI.markTaskClaimed(userID: uid, key: task.key, token: token)
-        await MainActor.run {
-            if !myTitles.contains(task.titleKey) { myTitles.append(task.titleKey) }
-            rewardToast = task.titleKey
+        if !myTitles.contains(task.titleKey) {
+            await SocialAPI.grantTitle(userID: uid, key: task.titleKey, source: "task", token: token)
         }
+        await MainActor.run {
+            if !myTitles.contains(task.titleKey) {
+                myTitles.append(task.titleKey)
+                rewardToast = task.titleKey
+            }
+        }
+        await refreshTaskBadge()
+    }
+
+    /// 任務角標：有沒有「達標但還沒領」的
+    func refreshTaskBadge() async {
+        guard let uid = userID, let token = userToken else { return }
+        let map = await SocialAPI.taskMap(userID: uid, token: token)
+        var any = false
+        for t in TaskDef.all {
+            if let (v, claimed) = map[t.key], v >= t.goal, !claimed,
+               !myTitles.contains(t.titleKey),
+               !isTaskClaimedLocally(t.key) {
+                any = true
+                break
+            }
+        }
+        await MainActor.run { taskBadge = any }
     }
 
     /// 兌換碼

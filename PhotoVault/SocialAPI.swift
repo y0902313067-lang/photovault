@@ -17,7 +17,7 @@ struct FeedPost: Identifiable, Equatable {
     let created: Date
 }
 
-struct ChatMessage: Identifiable, Equatable {
+struct ChatMessage: Identifiable, Equatable, Codable {
     let id: String
     let userID: String
     let profileID: String
@@ -115,20 +115,42 @@ enum SocialAPI {
     static func loadLevel(userID: String, token: String?) async -> MemberLevel {
         let f = enc("user=\"\(userID)\"")
         guard let obj = try? await request("GET",
-            "/api/collections/memberships/records?perPage=1&filter=\(f)", token: token),
-              let it = items(obj).first else { return .silver }
-        let n = (it["level"] as? Int) ?? Int((it["level"] as? Double) ?? 1)
-        return MemberLevel(rawValue: n) ?? .silver
+            "/api/collections/memberships/records?perPage=50&filter=\(f)", token: token) else {
+            return .silver
+        }
+        return bestLevel(items(obj))
+    }
+
+    /// 同一人多條會員記錄時，一律以最高等級為準
+    private static func bestLevel(_ list: [[String: Any]]) -> MemberLevel {
+        var best = -1
+        for it in list {
+            let n = (it["level"] as? Int) ?? Int((it["level"] as? Double) ?? 1)
+            if n > best { best = n }
+        }
+        guard best > 0 else { return .silver }
+        return MemberLevel(rawValue: best) ?? .silver
     }
 
     /// 保底：沒有會員記錄就依現在的下載階段給白銀
+    /// 順手把重複的會員記錄統一成最高等級，避免不同頁面讀到不同那條
     static func ensureMembership(userID: String, token: String?) async -> MemberLevel {
         let f = enc("user=\"\(userID)\"")
         if let obj = try? await request("GET",
-            "/api/collections/memberships/records?perPage=1&filter=\(f)", token: token),
-           let it = items(obj).first {
-            let n = (it["level"] as? Int) ?? Int((it["level"] as? Double) ?? 1)
-            return MemberLevel(rawValue: n) ?? .silver
+            "/api/collections/memberships/records?perPage=50&filter=\(f)", token: token),
+           !items(obj).isEmpty {
+            let list = items(obj)
+            let lv = bestLevel(list)
+            for it in list {
+                guard let id = it["id"] as? String else { continue }
+                let n = (it["level"] as? Int) ?? Int((it["level"] as? Double) ?? 1)
+                if n != lv.rawValue {
+                    _ = try? await request("PATCH",
+                        "/api/collections/memberships/records/\(id)",
+                        json: ["level": lv.rawValue], token: token)
+                }
+            }
+            return lv
         }
         // 建立：目前下載一律白銀
         let fallback = LaunchPhase.defaultLevel
@@ -207,10 +229,14 @@ enum SocialAPI {
     static func setLevel(userID: String, level: MemberLevel, token: String?) async {
         let f = enc("user=\"\(userID)\"")
         if let obj = try? await request("GET",
-            "/api/collections/memberships/records?perPage=1&filter=\(f)", token: token),
-           let it = items(obj).first, let id = it["id"] as? String {
-            _ = try? await request("PATCH", "/api/collections/memberships/records/\(id)",
-                                   json: ["level": level.rawValue], token: token)
+            "/api/collections/memberships/records?perPage=50&filter=\(f)", token: token),
+           !items(obj).isEmpty {
+            // 可能有多條，全部寫成同一個等級，之後不管讀哪條都一致
+            for it in items(obj) {
+                guard let id = it["id"] as? String else { continue }
+                _ = try? await request("PATCH", "/api/collections/memberships/records/\(id)",
+                                       json: ["level": level.rawValue], token: token)
+            }
         } else {
             _ = try? await request("POST", "/api/collections/memberships/records",
                                    json: ["user": userID, "level": level.rawValue], token: token)
@@ -255,7 +281,7 @@ enum SocialAPI {
         field("user", userID)
         field("text", text)
 
-        for (i, img) in images.prefix(4).enumerated() {
+        for (i, img) in images.prefix(9).enumerated() {
             guard let data = img.jpegData(compressionQuality: 0.82) else { continue }
             body.append(Data("--\(boundary)\r\n".utf8))
             body.append(Data("Content-Disposition: form-data; name=\"images\"; filename=\"p\(i).jpg\"\r\n".utf8))
@@ -293,7 +319,45 @@ enum SocialAPI {
         guard let obj = try? await request("GET",
             "/api/collections/chat/records?perPage=\(limit)&sort=created",
             token: token) else { return [] }
-        let raw = items(obj)
+        return await mapChat(items(obj), token: token)
+    }
+
+    /// 最近 N 條（新的在後面）
+    static func loadChatRecent(token: String?, limit: Int = 300) async -> [ChatMessage] {
+        guard let obj = try? await request("GET",
+            "/api/collections/chat/records?perPage=\(min(limit, 500))&sort=-created",
+            token: token) else { return [] }
+        return await mapChat(items(obj), token: token).sorted { $0.created < $1.created }
+    }
+
+    /// 只拉比這個時間新的訊息（輪詢用，不會每次把整串重抓）
+    static func loadChatSince(_ since: Date, token: String?, limit: Int = 200) async -> [ChatMessage] {
+        let f = enc("created > \"\(pbDate(since))\"")
+        guard let obj = try? await request("GET",
+            "/api/collections/chat/records?perPage=\(limit)&sort=created&filter=\(f)",
+            token: token) else { return [] }
+        return await mapChat(items(obj), token: token)
+    }
+
+    /// 未讀數：比 lastRead 新、又不是自己發的訊息
+    static func chatUnreadCount(since: Date, excludeUser: String?, token: String?) async -> Int {
+        var parts = ["created > \"\(pbDate(since))\""]
+        if let excludeUser, !excludeUser.isEmpty { parts.append("user != \"\(excludeUser)\"") }
+        let f = enc(parts.joined(separator: " && "))
+        guard let obj = try? await request("GET",
+            "/api/collections/chat/records?perPage=1&filter=\(f)", token: token) else { return 0 }
+        return (obj["totalItems"] as? Int) ?? 0
+    }
+
+    /// 離線時用：抓最新一條訊息（只取 id/created，很輕）
+    static func chatLatestDate(token: String?) async -> Date? {
+        guard let obj = try? await request("GET",
+            "/api/collections/chat/records?perPage=1&sort=-created&fields=id,created",
+            token: token) else { return nil }
+        return items(obj).first.map { date($0["created"]) }
+    }
+
+    private static func mapChat(_ raw: [[String: Any]], token: String?) async -> [ChatMessage] {
         let dec = await decorate(raw, token: token)
         return dec.map { d in
             ChatMessage(id: d.id, userID: d.userID, profileID: d.profileID, nickname: d.nickname, avatar: d.avatar,
@@ -303,6 +367,17 @@ enum SocialAPI {
                         created: d.created)
         }
     }
+
+    /// PocketBase 的日期格式
+    private static let pbFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        return f
+    }()
+
+    static func pbDate(_ d: Date) -> String { pbFormatter.string(from: d) }
 
     static func sendChat(userID: String, text: String, image: UIImage?, token: String?) async throws {
         guard let url = URL(string: base + "/api/collections/chat/records") else { return }
@@ -369,13 +444,17 @@ enum SocialAPI {
         }
 
         var levels: [String: MemberLevel] = [:]
+        var levelGroup: [String: [[String: Any]]] = [:]
         if let obj = try? await request("GET",
-            "/api/collections/memberships/records?perPage=100&filter=\(enc(filter))", token: token) {
+            "/api/collections/memberships/records?perPage=200&filter=\(enc(filter))", token: token) {
             for it in items(obj) {
                 if let uid = it["user"] as? String {
-                    let n = (it["level"] as? Int) ?? Int((it["level"] as? Double) ?? 1)
-                    levels[uid] = MemberLevel(rawValue: n) ?? .silver
+                    levelGroup[uid, default: []].append(it)
                 }
+            }
+            // 同一人多條記錄時取最高，不然會出現主頁黑金、聊天室卻顯示舊等級
+            for (uid, list) in levelGroup {
+                levels[uid] = bestLevel(list)
             }
         }
 
