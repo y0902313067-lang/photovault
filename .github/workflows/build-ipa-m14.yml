@@ -9,11 +9,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 XcodeGen
-        run: brew install xcodegen
+      - name: 安装 XcodeGen 2.38（兼容 Xcode 15）
+        run: |
+          curl -sL -o /tmp/xg.zip https://github.com/yonaskolb/XcodeGen/releases/download/2.38.0/xcodegen.zip
+          unzip -q /tmp/xg.zip -d /tmp
+          ls /tmp/xcodegen
+          echo "/tmp/xcodegen/bin" >> $GITHUB_PATH
 
       - name: 生成 Xcode 工程
-        run: xcodegen generate
+        run: |
+          xcodegen generate
+          grep -m1 objectVersion PhotoVault.xcodeproj/project.pbxproj
 
       - name: 编译（不签名）
         run: |
