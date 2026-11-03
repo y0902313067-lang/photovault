@@ -571,19 +571,48 @@ struct MotionSpeedView: View {
                 HStack(spacing: 14) {
                     limitSign
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(drive.limitFromInterval ? "區間測速速限" : "路段速限")
-                            .font(.system(size: 10, weight: .medium))
-                            .tracking(1.4)
-                            .foregroundStyle(.white.opacity(0.36))
+                        HStack(spacing: 6) {
+                            Text(drive.limitFromInterval ? "區間測速速限"
+                                 : (drive.limitEstimated ? "路段速限 · 推定" : "路段速限"))
+                                .font(.system(size: 10, weight: .medium))
+                                .tracking(1.4)
+                                .foregroundStyle(.white.opacity(0.36))
+                            if !drive.limitFromInterval {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.18)) { drive.estimateOn.toggle() }
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                } label: {
+                                    Text(drive.estimateOn ? "推定 ON" : "推定 OFF")
+                                        .font(.system(size: 8.5, weight: .semibold))
+                                        .foregroundStyle(drive.estimateOn ? TT.teal : .white.opacity(0.35))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Capsule().fill(drive.estimateOn
+                                                           ? TT.teal.opacity(0.16)
+                                                           : Color.white.opacity(0.05))
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                         if drive.limit != nil {
                             Text(drive.overSpeed ? "超速中" : String(format: "現在 %.0f km/h", nowKmh))
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(drive.overSpeed ? TT.rose : TT.mint)
+                            if drive.limitEstimated {
+                                Text("此處無實測速限，依同一條路的鄰近路段推定")
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(.white.opacity(0.3))
+                                    .lineLimit(2)
+                            }
                         } else {
                             Text(drive.dataReady ? "未收錄" : "載入圖資…")
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.5))
-                            Text("這條路段沒有速限資料，不拿別條路充數")
+                            Text(drive.dataReady && drive.estimateOn
+                                 ? "附近也找不到同級道路可推定"
+                                 : "這條路段沒有速限資料，不拿別條路充數")
                                 .font(.system(size: 9.5))
                                 .foregroundStyle(.white.opacity(0.3))
                                 .lineLimit(2)

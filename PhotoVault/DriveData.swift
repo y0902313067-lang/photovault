@@ -230,13 +230,31 @@ final class DriveData {
 
     // MARK: 查詢
 
-    /// 該座標的路段速限；查不到回 nil（不回退）
-    func limitAt(_ lat: Double, _ lon: Double) -> Int? {
+    struct LimitHit {
+        let speed: Int
+        let estimated: Bool     // true = 由鄰近同級道路推定，非該路段實測標籤
+    }
+
+    /// 精確命中判定（保留原本高架優先的加權：score = 距離 - 等級×6）
+    private static let EXACT_SCORE = 40.0
+    /// 推定時最多往外找多遠（公尺）
+    private static let EST_RADIUS = 2000.0
+    /// 推定參與投票的鄰近路段數
+    private static let EST_NEIGHBORS = 16
+
+    /// 該座標的路段速限；查不到回 nil
+    func limitAt(_ lat: Double, _ lon: Double) -> Int? { limitHit(lat, lon)?.speed }
+
+    func limitHit(_ lat: Double, _ lon: Double) -> LimitHit? {
         if tiles.isEmpty { return nil }
         let ti = Int(floor(lat / DriveData.TILE))
         let tj = Int(floor(lon / DriveData.TILE))
+
         var bestLimit: Int?
+        var bestLevel = 0
         var bestScore = Double.greatestFiniteMagnitude
+        var near: [(d: Double, s: Int, lv: Int)] = []
+        near.reserveCapacity(DriveData.EST_NEIGHBORS)
 
         for di in -1...1 {
             for dj in -1...1 {
@@ -246,11 +264,9 @@ final class DriveData {
                     var d = Double.greatestFiniteMagnitude
                     var i = 0
                     while i + 3 < seg.pts.count {
-                        let aLat = Double(seg.pts[i])
-                        let aLon = Double(seg.pts[i + 1])
-                        let bLat = Double(seg.pts[i + 2])
-                        let bLon = Double(seg.pts[i + 3])
-                        let dd = Geo.pointSegDist(lat, lon, aLat, aLon, bLat, bLon)
+                        let dd = Geo.pointSegDist(lat, lon,
+                                                  Double(seg.pts[i]), Double(seg.pts[i + 1]),
+                                                  Double(seg.pts[i + 2]), Double(seg.pts[i + 3]))
                         if dd < d { d = dd }
                         i += 2
                     }
@@ -259,10 +275,40 @@ final class DriveData {
                     if score < bestScore {
                         bestScore = score
                         bestLimit = seg.limit
+                        bestLevel = seg.level
+                    }
+                    if d < DriveData.EST_RADIUS {
+                        pushNear(&near, d, seg.limit, seg.level)
                     }
                 }
             }
         }
-        return bestScore < 40 ? bestLimit : nil
+
+        // ① 該處確實有速限資料
+        if let b = bestLimit, bestScore < DriveData.EXACT_SCORE {
+            return LimitHit(speed: b, estimated: false)
+        }
+
+        // ② 沒有實測 → 用同一條路 / 同級道路的鄰近路段推定
+        let refLevel = bestLevel
+        let same = near.filter { abs($0.lv - refLevel) <= 1 }
+        guard !same.isEmpty else { return nil }
+        var weight: [Int: Double] = [:]
+        for c in same {
+            weight[c.s, default: 0] += 1.0 / (1.0 + c.d / 60.0)
+        }
+        guard let top = weight.max(by: { $0.value < $1.value }) else { return nil }
+        return LimitHit(speed: top.key, estimated: true)
+    }
+
+    /// 維護「最近的 N 條路段」
+    private func pushNear(_ arr: inout [(d: Double, s: Int, lv: Int)], _ d: Double, _ s: Int, _ lv: Int) {
+        if arr.count < DriveData.EST_NEIGHBORS {
+            arr.append((d, s, lv))
+            if arr.count == DriveData.EST_NEIGHBORS { arr.sort { $0.d < $1.d } }
+        } else if let last = arr.last, d < last.d {
+            arr[DriveData.EST_NEIGHBORS - 1] = (d, s, lv)
+            arr.sort { $0.d < $1.d }
+        }
     }
 }

@@ -42,6 +42,7 @@ final class DriveAlertEngine: ObservableObject {
     // 對外顯示
     @Published private(set) var limit: Int?
     @Published private(set) var limitFromInterval = false
+    @Published private(set) var limitEstimated = false
     @Published private(set) var cameraAlert: CameraAlert?
     @Published private(set) var intervalApproach: IntervalApproach?
     @Published private(set) var intervalLive: IntervalLive?
@@ -51,6 +52,13 @@ final class DriveAlertEngine: ObservableObject {
     @Published private(set) var intervalCount = 0
     @Published var voiceOn: Bool = DriveVoice.shared.enabled {
         didSet { DriveVoice.shared.enabled = voiceOn }
+    }
+    /// 沒有實測速限的路段，是否用同級道路鄰近路段推定（預設開）
+    @Published var estimateOn: Bool = UserDefaults.standard.object(forKey: "driveEstimateOn") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(estimateOn, forKey: "driveEstimateOn")
+            candidateAt = Date.distantPast
+        }
     }
 
     private let data = DriveData.shared
@@ -76,6 +84,7 @@ final class DriveAlertEngine: ObservableObject {
     private var firedIv: [Int: Date] = [:]
     private var candidateLimit: Int?
     private var candidateAt: Date?
+    private var candidateEst = false
     private var saidLimit: Int?
     private var overAt = Date.distantPast
     private var run: IntervalRun?
@@ -159,29 +168,35 @@ final class DriveAlertEngine: ObservableObject {
     private func refreshLimit(lat: Double, lon: Double, now: Date) {
         // 區間路段自帶速限，優先且立即採用
         if let r = run {
-            applyLimit(r.zone.limit, fromInterval: true, now: now)
+            applyLimit(r.zone.limit, fromInterval: true, estimated: false, now: now)
             candidateLimit = r.zone.limit
+            candidateEst = false
             candidateAt = now
             return
         }
 
-        let found = data.limitAt(lat, lon)
-        if found != candidateLimit {
+        let hit = data.limitHit(lat, lon)
+        var found = hit?.speed
+        var est = hit?.estimated ?? false
+        if est, !estimateOn { found = nil; est = false }
+        if found != candidateLimit || est != candidateEst {
             candidateLimit = found
+            candidateEst = est
             candidateAt = now
-            if found == nil { applyLimit(nil, fromInterval: false, now: now) }
+            if found == nil { applyLimit(nil, fromInterval: false, estimated: false, now: now) }
             return
         }
         guard let f = found, let at = candidateAt else { return }
         // 連續 2.5 秒都在同一速限才確認，避免路口跳動
         if now.timeIntervalSince(at) > 2.5 {
-            applyLimit(f, fromInterval: false, now: now)
+            applyLimit(f, fromInterval: false, estimated: est, now: now)
         }
     }
 
-    private func applyLimit(_ v: Int?, fromInterval: Bool, now: Date) {
+    private func applyLimit(_ v: Int?, fromInterval: Bool, estimated: Bool = false, now: Date) {
         if limit != v { limit = v }
         if limitFromInterval != fromInterval { limitFromInterval = fromInterval }
+        if limitEstimated != estimated { limitEstimated = estimated }
 
         let over = (v != nil) && speedKmh > Double(v!) + 9 && speedKmh > 12
         if overSpeed != over { overSpeed = over }
