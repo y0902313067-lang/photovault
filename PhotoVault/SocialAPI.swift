@@ -30,6 +30,42 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let created: Date
 }
 
+// MARK: - 聊天室「回覆」
+
+// 後端 chat 表沒有「回覆哪一條」的欄位，也不能改結構，
+// 所以引用資訊跟著正文一起送：正文前面黏一段固定格式的引用行，
+// 讀的時候再拆出來顯示。舊版 App 看到的就是多一行文字，不會壞掉。
+
+extension ChatMessage {
+    static let replyOpen = "⟦回覆 "
+    static let replyClose = "⟧\n"
+
+    /// 引用行：暱稱 + 摘要
+    var replyQuote: (nick: String, quote: String)? {
+        guard text.hasPrefix(Self.replyOpen),
+              let end = text.range(of: Self.replyClose) else { return nil }
+        let start = text.index(text.startIndex, offsetBy: Self.replyOpen.count)
+        let head = String(text[start..<end.lowerBound])
+        guard let sep = head.range(of: "：") else { return nil }
+        return (String(head[..<sep.lowerBound]), String(head[sep.upperBound...]))
+    }
+
+    /// 真正的內容（把引用行去掉）
+    var bodyText: String {
+        guard text.hasPrefix(Self.replyOpen),
+              let end = text.range(of: Self.replyClose) else { return text }
+        return String(text[end.upperBound...])
+    }
+
+    static func composeText(body: String, replyTo: (nick: String, quote: String)?) -> String {
+        guard let r = replyTo else { return body }
+        let nick = String(r.nick.prefix(12))
+        let flat = r.quote.replacingOccurrences(of: "\n", with: " ")
+        let quote = String(flat.prefix(40))
+        return "⟦回覆 \(nick)：\(quote)⟧\n" + body
+    }
+}
+
 struct PendingGrant: Identifiable, Equatable {
     let id: String
     let kind: String      // "title" / "level"
@@ -285,7 +321,7 @@ enum SocialAPI {
         }
 
         field("user", userID)
-        field("text", text)
+        field("text", ChatMessage.composeText(body: text, replyTo: replyTo))
 
         for (i, img) in images.prefix(9).enumerated() {
             guard let data = img.jpegData(compressionQuality: 0.82) else { continue }
@@ -333,7 +369,9 @@ enum SocialAPI {
         guard let obj = try? await request("GET",
             "/api/collections/chat/records?perPage=\(min(limit, 500))&sort=-created",
             token: token) else { return [] }
-        return await mapChat(items(obj), token: token).sorted { $0.created < $1.created }
+        // 伺服器是「新到舊」，反轉就是舊到新。
+        // 不用 sorted：同一秒內的多條訊息會被非穩定排序洗牌，看起來就像整段倒過來。
+        return await mapChat(items(obj), token: token).reversed()
     }
 
     /// 只拉比這個時間新的訊息（輪詢用，不會每次把整串重抓）
@@ -385,7 +423,9 @@ enum SocialAPI {
 
     static func pbDate(_ d: Date) -> String { pbFormatter.string(from: d) }
 
-    static func sendChat(userID: String, text: String, image: UIImage?, token: String?) async throws {
+    static func sendChat(userID: String, text: String, image: UIImage?,
+                         replyTo: (nick: String, quote: String)? = nil,
+                         token: String?) async throws {
         guard let url = URL(string: base + "/api/collections/chat/records") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

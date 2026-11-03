@@ -24,21 +24,78 @@ final class ChatCache {
     private var ids: Set<String> = []
     private var writeScheduled = false
 
+    /// 快取格式版本：舊版的存檔把時間截到秒，同秒訊息順序已經亂了，
+    /// 升上來先丟掉重抓一次，之後就都是正確順序
+    private static let formatVersion = 2
+    private static let versionKey = "pv.chat.cache.version"
+
     private init() {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         url = dir.appendingPathComponent("pv_chat_cache.json")
+
+        let saved = UserDefaults.standard.integer(forKey: Self.versionKey)
+        if saved < Self.formatVersion {
+            try? FileManager.default.removeItem(at: url)
+            UserDefaults.standard.set(Self.formatVersion, forKey: Self.versionKey)
+        }
         read()
+    }
+
+    // MARK: 時間精度
+    //
+    // 原本用 .iso8601 存檔，時間只到「秒」。同一秒內連續發的幾條訊息
+    // 存回來後 created 全部一樣，重排時順序就散了（離線重開會看到整段倒過來）。
+    // 這裡改成帶毫秒，解碼則新舊格式都吃。
+
+    private static let isoFull: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static func makeEncoder() -> JSONEncoder {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .custom { date, enc in
+            var c = enc.singleValueContainer()
+            try c.encode(isoFull.string(from: date))
+        }
+        return e
+    }
+
+    private static func makeDecoder() -> JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { dec in
+            let s = try dec.singleValueContainer().decode(String.self)
+            if let t = isoFull.date(from: s) { return t }
+            if let t = isoPlain.date(from: s) { return t }
+            return Date(timeIntervalSince1970: 0)
+        }
+        return d
+    }
+
+    /// 穩定排序：時間相同時保留原本的先後，不會把同秒的訊息洗牌
+    private static func stableSorted(_ list: [ChatMessage]) -> [ChatMessage] {
+        list.enumerated()
+            .sorted { a, b in
+                if a.element.created == b.element.created { return a.offset < b.offset }
+                return a.element.created < b.element.created
+            }
+            .map { $0.element }
     }
 
     // MARK: 讀寫
 
     private func read() {
         guard let data = try? Data(contentsOf: url) else { return }
-        let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
-        guard let list = try? dec.decode([ChatMessage].self, from: data) else { return }
-        // 先依時間排好，之後 append 才能直接往後接
-        let sorted = list.sorted { $0.created < $1.created }
+        guard let list = try? Self.makeDecoder().decode([ChatMessage].self, from: data) else { return }
+        // 先依時間排好，之後 append 才能直接往後接（同秒的保持原順序）
+        let sorted = Self.stableSorted(list)
         var seen = Set<String>()
         var unique: [ChatMessage] = []
         unique.reserveCapacity(sorted.count)
@@ -71,9 +128,7 @@ final class ChatCache {
     }
 
     private func write(_ snapshot: [ChatMessage]) {
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        guard let data = try? enc.encode(snapshot) else { return }
+        guard let data = try? Self.makeEncoder().encode(snapshot) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
@@ -95,12 +150,12 @@ final class ChatCache {
             lock.unlock()
             return same
         }
-        added.sort { $0.created < $1.created }
+        added = Self.stableSorted(added)
 
         // 絕大多數情況新資料都比現有最新的一條還新，直接往後接就好
         if let last = items.last, added.first!.created < last.created {
             items.append(contentsOf: added)
-            items.sort { $0.created < $1.created }
+            items = Self.stableSorted(items)
         } else {
             items.append(contentsOf: added)
         }
@@ -127,12 +182,12 @@ final class ChatCache {
             lock.unlock()
             return []
         }
-        added.sort { $0.created < $1.created }
+        added = Self.stableSorted(added)
 
         var needsSort = false
         if let last = items.last, added.first!.created < last.created { needsSort = true }
         items.append(contentsOf: added)
-        if needsSort { items.sort { $0.created < $1.created } }
+        if needsSort { items = Self.stableSorted(items) }
         var removed = false
         if items.count > Self.diskLimit {
             let drop = items.count - Self.diskLimit

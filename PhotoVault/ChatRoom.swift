@@ -26,6 +26,8 @@ struct ChatRoomView: View {
     @State private var timer: Timer?
     @State private var stickToBottom = true
     @State private var didInitialScroll = false
+    /// 正在回覆哪一條
+    @State private var replying: ReplyTarget?
 
     /// 一次渲染幾則（往上按一下再加一頁）
     private let pageSize = 220
@@ -56,6 +58,12 @@ struct ChatRoomView: View {
                                             myAvatar: store.avatarImage,
                                             onGuest: { pid in
                                                 if !pid.isEmpty { guest = pid }
+                                            },
+                                            onReply: { msg in
+                                                let raw = msg.bodyText.isEmpty
+                                                    ? (msg.image != nil ? "[圖片]" : "")
+                                                    : msg.bodyText
+                                                replying = ReplyTarget(nick: msg.nickname, quote: raw)
                                             })
                                     .equatable()
                                     .id(m.id)
@@ -154,6 +162,12 @@ struct ChatRoomView: View {
 
     struct GuestBox: Identifiable { let id: String }
 
+    struct ReplyTarget: Identifiable {
+        let id = UUID()
+        let nick: String
+        let quote: String
+    }
+
     // MARK: 往上載入更早
 
     private func loadEarlierBar(_ proxy: ScrollViewProxy) -> some View {
@@ -195,6 +209,31 @@ struct ChatRoomView: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
+            if let replying {
+                HStack(spacing: 7) {
+                    Rectangle()
+                        .fill(TT.mint.opacity(0.7))
+                        .frame(width: 2.5, height: 26)
+                        .clipShape(Capsule())
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("回覆 \(replying.nick)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(TT.mint.opacity(0.95))
+                        Text(replying.quote)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    Button { self.replying = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                }
+                .padding(.horizontal, 14)
+            }
+
             if let attach {
                 HStack(spacing: 8) {
                     Image(uiImage: attach).resizable().scaledToFill()
@@ -249,7 +288,8 @@ struct ChatRoomView: View {
                     }
                     .frame(width: 40, height: 40)
                 }
-                .disabled(sending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attach == nil))
+                .disabled(sending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                      && attach == nil && replying == nil))
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 10)
@@ -343,13 +383,15 @@ struct ChatRoomView: View {
         tip = nil
         Task {
             do {
+                let quote = replying.map { (nick: $0.nick, quote: $0.quote) }
                 try await SocialAPI.sendChat(userID: uid, text: t, image: attach,
-                                             token: store.authToken)
+                                             replyTo: quote, token: store.authToken)
                 store.bumpTask("socialking", add: 1)
                 await MainActor.run {
                     input = ""
                     attach = nil
                     sending = false
+                    replying = nil
                     stickToBottom = true
                 }
                 // 只補抓新的那幾條，不再整批重載
@@ -376,6 +418,7 @@ private struct ChatRow: View, Equatable {
     let myProfileID: String
     let myAvatar: UIImage?
     let onGuest: (String) -> Void
+    let onReply: (ChatMessage) -> Void
 
     static func == (a: ChatRow, b: ChatRow) -> Bool {
         a.m == b.m
@@ -407,8 +450,12 @@ private struct ChatRow: View, Equatable {
                 .frame(maxWidth: mine ? .infinity : nil,
                        alignment: mine ? .trailing : .leading)
 
-                if !m.text.isEmpty {
-                    Text(m.text)
+                if let q = m.replyQuote {
+                    replyBlock(q)
+                }
+
+                if !m.bodyText.isEmpty {
+                    Text(m.bodyText)
                         .font(.system(size: 14.5))
                         .foregroundStyle(.white.opacity(0.94))
                         .padding(.horizontal, 12)
@@ -449,5 +496,38 @@ private struct ChatRow: View, Equatable {
 
             if !mine { Spacer(minLength: 40) }
         }
+        .contextMenu {
+            Button {
+                onReply(m)
+            } label: {
+                Label("回覆", systemImage: "arrowshape.turn.up.left.fill")
+            }
+        }
+    }
+
+    /// 引用別人的那段（左側一條細線 + 暱稱 + 摘要）
+    private func replyBlock(_ q: (nick: String, quote: String)) -> some View {
+        HStack(spacing: 6) {
+            Capsule()
+                .fill(mine ? TT.mint.opacity(0.55) : Color.white.opacity(0.22))
+                .frame(width: 2.5, height: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(q.nick)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(mine ? TT.mint.opacity(0.85) : Color.white.opacity(0.55))
+                    .lineLimit(1)
+                Text(q.quote)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: 190, alignment: .leading)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
     }
 }
