@@ -190,7 +190,7 @@ final class AppStore: ObservableObject {
             if g.kind == "title", let def = Titles.find(g.value) {
                 if !titles.contains(def.key) { newKeys.append(def.key) }
             } else if g.kind == "level", let n = Int(g.value), let target = MemberLevel(rawValue: n) {
-                if target.rawValue > finalLevel.rawValue { finalLevel = target }
+                finalLevel = target
             }
             await SocialAPI.markGrantSeen(id: g.id, token: token)
         }
@@ -243,7 +243,7 @@ final class AppStore: ObservableObject {
                 }
             } else if g.kind == "level", let n = Int(g.value), let lv = MemberLevel(rawValue: n) {
                 await MainActor.run {
-                    if lv.rawValue > level.rawValue { level = lv }
+                    level = lv
                     rewardToast = "level:\(lv.rawValue)"
                 }
             }
