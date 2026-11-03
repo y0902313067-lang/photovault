@@ -595,6 +595,8 @@ struct MotionSpeedView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+                            Spacer(minLength: 8)
+                            voiceChip
                         }
                         if drive.limit != nil {
                             Text(drive.overSpeed ? "超速中" : String(format: "現在 %.0f km/h", nowKmh))
@@ -607,50 +609,36 @@ struct MotionSpeedView: View {
                                     .lineLimit(2)
                             }
                         } else {
-                            Text(drive.dataReady ? "未收錄" : "載入圖資…")
+                            Text(drive.dataReady ? "非限速路段" : "載入圖資…")
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.5))
-                            Text(drive.dataReady && drive.estimateOn
-                                 ? "附近也找不到同級道路可推定"
-                                 : "這條路段沒有速限資料，不拿別條路充數")
-                                .font(.system(size: 9.5))
-                                .foregroundStyle(.white.opacity(0.3))
-                                .lineLimit(2)
                         }
                     }
                     Spacer(minLength: 0)
-                }
-
-                HStack(spacing: 8) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) { drive.voiceOn.toggle() }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: drive.voiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                .font(.system(size: 10.5, weight: .semibold))
-                            Text(drive.voiceOn ? "語音播報" : "已靜音")
-                                .font(.system(size: 10.5, weight: .semibold))
-                        }
-                        .foregroundStyle(drive.voiceOn ? TT.ink : .white.opacity(0.6))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule().fill(drive.voiceOn ? TT.amber.opacity(0.9) : Color.white.opacity(0.06))
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer(minLength: 0)
-
-                    if drive.dataReady {
-                        Text("相機 \(drive.cameraCount) · 區間 \(drive.intervalCount)")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.white.opacity(0.28))
-                    }
                 }
             }
         }
+    }
+
+    private var voiceChip: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { drive.voiceOn.toggle() }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: drive.voiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(drive.voiceOn ? "語音播報" : "已靜音")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundStyle(drive.voiceOn ? TT.ink : .white.opacity(0.6))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(drive.voiceOn ? TT.amber.opacity(0.9) : Color.white.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var limitSign: some View {
