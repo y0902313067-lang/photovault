@@ -34,16 +34,11 @@ struct AvatarBubble: View {
                     .frame(width: size, height: size)
                     .clipShape(Circle())
             } else if let file, let url = SocialAPI.fileURL(collection: "profiles", record: profileID, file: file) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        Image(systemName: "person.fill")
-                            .font(.system(size: size * 0.40))
-                            .foregroundStyle(.white.opacity(0.28))
-                    }
-                }
+                CachedImage(url: url, placeholder: AnyView(
+                    Image(systemName: "person.fill")
+                        .font(.system(size: size * 0.40))
+                        .foregroundStyle(.white.opacity(0.28))
+                ))
                 .frame(width: size, height: size)
                 .clipShape(Circle())
             } else {
@@ -279,6 +274,12 @@ struct LevelTagInline: View {
     }
 }
 
+private let pvShortDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "M/d"
+    return f
+}()
+
 func shortTime(_ d: Date) -> String {
     let now = Date()
     let gap = now.timeIntervalSince(d)
@@ -286,9 +287,7 @@ func shortTime(_ d: Date) -> String {
     if gap < 3600 { return "\(Int(gap / 60)) 分鐘前" }
     if gap < 86400 { return "\(Int(gap / 3600)) 小時前" }
     if gap < 86400 * 7 { return "\(Int(gap / 86400)) 天前" }
-    let f = DateFormatter()
-    f.dateFormat = "M/d"
-    return f.string(from: d)
+    return pvShortDateFormatter.string(from: d)
 }
 
 // MARK: - 頭貼選擇
@@ -531,7 +530,7 @@ struct ProfilePageView: View {
                     .buttonStyle(.plain)
                 }
             }
-            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 4)
+            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 9)
         }
         .padding(.horizontal, 2)
     }

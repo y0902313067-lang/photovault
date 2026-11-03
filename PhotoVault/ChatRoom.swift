@@ -6,6 +6,7 @@ import PhotosUI
 struct ChatRoomView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var messages: [ChatMessage] = []
     @State private var input = ""
@@ -16,6 +17,8 @@ struct ChatRoomView: View {
     @State private var guest: String?
     @State private var loading = true
     @State private var timer: Timer?
+    /// 目前畫面上最多掛幾則（本機快取 5000，全掛上去會拖慢捲動）
+    private let shownLimit = ChatCache.diskLimit
 
     var body: some View {
         NavigationStack {
@@ -70,9 +73,17 @@ struct ChatRoomView: View {
             }
             .task {
                 await load()
-                startPolling()
+                if scenePhase == .active { startPolling() }
             }
-            .onDisappear { timer?.invalidate(); timer = nil }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active {
+                    startPolling()
+                    Task { await poll() }
+                } else {
+                    stopPolling()
+                }
+            }
+            .onDisappear { stopPolling() }
         }
     }
 
@@ -123,17 +134,12 @@ struct ChatRoomView: View {
 
                 if let img = m.image,
                    let url = SocialAPI.fileURL(collection: "chat", record: m.id, file: img) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let im):
-                            im.resizable().scaledToFill()
-                        default:
-                            ZStack {
-                                Color.white.opacity(0.05)
-                                ProgressView().tint(.white.opacity(0.35))
-                            }
+                    CachedImage(url: url, placeholder: AnyView(
+                        ZStack {
+                            Color.white.opacity(0.05)
+                            ProgressView().tint(.white.opacity(0.35))
                         }
-                    }
+                    ))
                     .frame(width: 180, height: 180)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
@@ -247,28 +253,43 @@ struct ChatRoomView: View {
         } else {
             list = ChatCache.shared.merge(recent)
         }
+        let tail = Array(list.suffix(shownLimit))
         await MainActor.run {
-            messages = Array(list.suffix(ChatCache.diskLimit))
+            messages = tail
             loading = false
         }
     }
 
-    /// 輪詢：只抓比最後一條更新的，併進快取
+    /// 輪詢：只抓比最後一條更新的，且只把「新增的那幾條」接到畫面後面
     private func poll() async {
-        let since = messages.last?.created ?? Date(timeIntervalSince1970: 0)
+        let since = await MainActor.run { messages.last?.created ?? Date(timeIntervalSince1970: 0) }
         let fresh = await SocialAPI.loadChatSince(since, token: store.authToken, limit: 200)
         guard !fresh.isEmpty else { return }
-        let merged = ChatCache.shared.merge(fresh)
+
+        let added = ChatCache.shared.appendNew(fresh)
+        guard !added.isEmpty else { return }
+
         await MainActor.run {
-            messages = Array(merged.suffix(ChatCache.diskLimit))
+            messages.append(contentsOf: added)
+            if messages.count > shownLimit {
+                messages.removeFirst(messages.count - shownLimit)
+            }
         }
     }
 
     private func startPolling() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { _ in
+        stopPolling()
+        let t = Timer(timeInterval: 6, repeats: true) { _ in
             Task { await poll() }
         }
+        t.tolerance = 1.5
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func stopPolling() {
+        timer?.invalidate()
+        timer = nil
     }
 
     private func send() {
@@ -286,7 +307,8 @@ struct ChatRoomView: View {
                     attach = nil
                     sending = false
                 }
-                await load()
+                // 只補抓新的那幾條，不再整批重載
+                await poll()
             } catch {
                 await MainActor.run {
                     sending = false
