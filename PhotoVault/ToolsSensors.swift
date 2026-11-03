@@ -261,7 +261,9 @@ final class CompassModel: NSObject, ObservableObject, CLLocationManagerDelegate 
 
 struct CompassView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: AppStore
     @StateObject private var model = CompassModel()
+    @State private var gotNorth = false
 
     var body: some View {
         TTScreen(title: "指南針",
@@ -271,6 +273,19 @@ struct CompassView: View {
                  accent: TT.blue) {
             if model.available {
                 dial
+                if gotNorth {
+                    TTPanel(accent: TT.mint) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(TT.mint)
+                            Text("已對準北方 · 稱號「漂向北方」到手")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(TT.mint)
+                            Spacer()
+                        }
+                    }
+                }
                 HStack(spacing: 10) {
                     TTStat(title: "磁北", value: String(format: "%.0f", model.magnetic), unit: "°", accent: TT.blue)
                     TTStat(title: "真北",
@@ -291,6 +306,16 @@ struct CompassView: View {
         }
         .onAppear { model.start() }
         .onDisappear { model.stop() }
+        .onChange(of: model.magnetic) { v in
+            // 指到北方（正負 12 度內）就算一次
+            guard !gotNorth, model.accuracy >= 0, model.accuracy <= 35 else { return }
+            let d = min(v, 360 - v)
+            if d <= 12 {
+                gotNorth = true
+                store.bumpTask("north", add: 1)
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        }
     }
 
     private var dial: some View {

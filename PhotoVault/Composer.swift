@@ -181,6 +181,7 @@ struct ComposerView: View {
                                              text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                                              images: images, video: videoURL,
                                              token: store.authToken)
+                store.bumpTask("nicejob", add: 1)
                 await onDone?()
                 await MainActor.run { dismiss() }
             } catch {

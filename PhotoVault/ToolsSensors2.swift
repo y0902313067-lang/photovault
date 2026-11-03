@@ -63,6 +63,7 @@ final class GravityModel: ObservableObject {
 
 struct GravityView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: AppStore
     @StateObject private var model = GravityModel()
 
     private var impactColor: Color {
@@ -124,6 +125,10 @@ struct GravityView: View {
         }
         .onAppear { model.start() }
         .onDisappear { model.stop() }
+        .onChange(of: model.shakes) { v in
+            // 每晃一下記一次，「6767」要累積 67 下
+            if v > 0 { store.bumpTask("shake67", add: 1) }
+        }
     }
 
     private var ballBlock: some View {

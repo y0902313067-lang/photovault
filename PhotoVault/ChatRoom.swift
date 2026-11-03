@@ -280,6 +280,7 @@ struct ChatRoomView: View {
             do {
                 try await SocialAPI.sendChat(userID: uid, text: t, image: attach,
                                              token: store.authToken)
+                store.bumpTask("socialking", add: 1)
                 await MainActor.run {
                     input = ""
                     attach = nil

@@ -13,6 +13,7 @@ struct DecisionSet: Identifiable, Codable, Equatable {
 // MARK: - 頁面
 
 struct DecisionEngineView: View {
+    @EnvironmentObject var store: AppStore
     @State private var mode = 0
 
     @State private var optionsText = ""
@@ -367,6 +368,7 @@ struct DecisionEngineView: View {
 
             TTButton(title: "擲骰子", icon: "die.face.5", accent: TT.amber, enabled: true) {
                 diceValues = (0..<diceCount).map { _ in Int.random(in: 1...diceSides) }
+                store.bumpTask("diceluck", add: 1)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         }

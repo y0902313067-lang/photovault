@@ -376,6 +376,7 @@ enum X509Lite {
 // MARK: - 頁面
 
 struct DomainInfoView: View {
+    @EnvironmentObject var store: AppStore
     @State private var input = ""
     @State private var report: DomainReport?
     @State private var loading = false
@@ -438,6 +439,7 @@ struct DomainInfoView: View {
                 }
             }
         }
+        .onAppear { store.bumpTask("netdoc", add: 1) }
     }
 
     // MARK: 查詢

@@ -215,6 +215,8 @@ enum QRStudioRenderer {
 // MARK: - 頁面
 
 struct QRStudioView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var credited = false
     @State private var kind: QRStudioKind = .url
 
     @State private var urlText = "https://"
@@ -786,5 +788,9 @@ struct QRStudioView: View {
                                        icon: icon)
         hint = nil
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+        if !credited {
+            credited = true
+            store.bumpTask("qrartist", add: 1)
+        }
     }
 }

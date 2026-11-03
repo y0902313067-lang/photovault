@@ -171,6 +171,7 @@ enum DeviceProbe {
 
 struct DeviceInfoView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: AppStore
 
     @State private var batteryLevel: Int = -1
     @State private var batteryState: String = "—"
@@ -197,6 +198,7 @@ struct DeviceInfoView: View {
         .onAppear {
             UIDevice.current.isBatteryMonitoringEnabled = true
             refreshBattery()
+            store.bumpTask("gearhead", add: 1)
             withAnimation(.easeOut(duration: 0.5)) { appear = true }
         }
         .onDisappear {

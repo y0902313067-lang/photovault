@@ -465,6 +465,7 @@ enum MeasureData {
 
 struct UnitConvertView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: AppStore
     @State private var categoryIndex = 0
     @State private var input = "1"
     @State private var fromIndex = 0
@@ -484,6 +485,7 @@ struct UnitConvertView: View {
             inputBlock
             resultList
         }
+        .onAppear { store.bumpTask("mathprof", add: 1) }
     }
 
     private var categoryChips: some View {

@@ -142,6 +142,7 @@ enum LoanMath {
 // MARK: - 頁面
 
 struct LoanView: View {
+    @EnvironmentObject var store: AppStore
     @State private var principalText = "8,000,000"
     @State private var rateText = "2.15"
     @State private var monthsText = "360"
@@ -183,6 +184,7 @@ struct LoanView: View {
             }
             noteBlock
         }
+        .onAppear { store.bumpTask("tophat", add: 1) }
     }
 
     // MARK: 情境

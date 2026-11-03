@@ -25,7 +25,28 @@ struct TaskDef: Identifiable, Equatable {
         TaskDef(key: "db", titleKey: "db", name: "獅吼功", goal: 100, unit: "分貝",
                 icon: "speaker.wave.3", how: "使用分貝計測到 100 分貝以上"),
         TaskDef(key: "fx", titleKey: "fx", name: "外交官", goal: 3, unit: "次",
-                icon: "dollarsign.circle", how: "查看即時匯率 3 次")
+                icon: "dollarsign.circle", how: "查看即時匯率 3 次"),
+
+        TaskDef(key: "netdoc", titleKey: "netdoc", name: "資訊老師", goal: 1, unit: "次",
+                icon: "globe", how: "打開網域資訊工具一次"),
+        TaskDef(key: "north", titleKey: "north", name: "漂向北方", goal: 1, unit: "次",
+                icon: "location.north.line", how: "用指南針指著北方一次"),
+        TaskDef(key: "gearhead", titleKey: "gearhead", name: "裝備組的", goal: 1, unit: "次",
+                icon: "cpu", how: "點開裝置資訊一次"),
+        TaskDef(key: "shake67", titleKey: "shake67", name: "6767", goal: 67, unit: "次",
+                icon: "gyroscope", how: "用重力感測晃動 67 次"),
+        TaskDef(key: "mathprof", titleKey: "mathprof", name: "數學老師", goal: 1, unit: "次",
+                icon: "function", how: "點開單位換算一次"),
+        TaskDef(key: "qrartist", titleKey: "qrartist", name: "QR藝術家", goal: 1, unit: "個",
+                icon: "qrcode", how: "用 QR 工作室做出一個二維碼"),
+        TaskDef(key: "diceluck", titleKey: "diceluck", name: "愛拼才會贏", goal: 1, unit: "次",
+                icon: "die.face.5", how: "用隨機決策的骰子擲一次"),
+        TaskDef(key: "tophat", titleKey: "tophat", name: "高利戴帽子", goal: 1, unit: "次",
+                icon: "percent", how: "用貸款試算算一次"),
+        TaskDef(key: "nicejob", titleKey: "nicejob", name: "好棒棒餒", goal: 1, unit: "篇",
+                icon: "hand.thumbsup", how: "發一篇動態"),
+        TaskDef(key: "socialking", titleKey: "socialking", name: "超級社牛", goal: 1, unit: "次",
+                icon: "bubble.left.and.bubble.right", how: "在聊天室發一次言")
     ]
 }
 
@@ -72,6 +93,11 @@ struct TasksView: View {
         }
     }
 
+    private var ownedTaskTitles: Int {
+        let keys = Set(TaskDef.all.map { $0.titleKey })
+        return store.myTitles.filter { keys.contains($0) }.count
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
@@ -82,7 +108,7 @@ struct TasksView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92))
             }
-            Text("已擁有 \(store.myTitles.count) / \(Titles.all.count) 個稱號")
+            Text("已擁有 \(ownedTaskTitles) / \(TaskDef.all.count) 個任務稱號")
                 .font(.system(size: 11.5))
                 .foregroundStyle(.white.opacity(0.35))
         }
