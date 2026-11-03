@@ -208,7 +208,7 @@ final class AppStore: ObservableObject {
             level = finalLevel
             var list = titles
             for k in newKeys where !list.contains(k) { list.append(k) }
-            myTitles = list
+            myTitles = Titles.resolved(list, level: finalLevel)
             pendingGrants = []
             if let first = newKeys.first, let def = Titles.find(first) {
                 rewardToast = first

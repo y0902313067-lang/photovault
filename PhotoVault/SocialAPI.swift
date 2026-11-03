@@ -398,7 +398,8 @@ enum SocialAPI {
                              nickname: (p?["nickname"] as? String) ?? "用戶",
                              avatar: p?["avatar"] as? String,
                              level: levels[uid] ?? .silver,
-                             titles: titleMap[uid] ?? [],
+                             titles: Titles.resolved(titleMap[uid] ?? [],
+                                                     level: levels[uid] ?? .silver),
                              raw: it,
                              created: date(it["created"]))
         }
@@ -413,7 +414,7 @@ enum SocialAPI {
         return PublicUser(id: profileID, userID: uid,
                           nickname: (obj["nickname"] as? String) ?? "用戶",
                           avatar: obj["avatar"] as? String,
-                          level: level, titles: titles)
+                          level: level, titles: Titles.resolved(titles, level: level))
     }
 
     static func loadUserPosts(userID: String, token: String?, limit: Int = 30) async -> [FeedPost] {

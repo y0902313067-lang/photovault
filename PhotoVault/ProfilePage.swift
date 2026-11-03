@@ -105,7 +105,8 @@ struct PostCard: View {
                                 .lineLimit(1)
                             LevelTagInline(level: post.level)
                         }
-                        if let first = post.titles.first, let def = Titles.find(first) {
+                        if let def = post.titles.compactMap({ Titles.find($0) })
+                            .max(by: { $0.tier < $1.tier }) {
                             TitleChip(title: def, size: 0.66, animated: false)
                         }
                     }
