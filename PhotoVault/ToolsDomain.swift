@@ -729,12 +729,14 @@ struct DomainInfoView: View {
 
             rep.finishedAt = Date()
 
+            let snap = rep
+            let noData = snap.aRecords.isEmpty && snap.aaaaRecords.isEmpty
+                && snap.registrar == nil && snap.certNotAfter == nil
             await MainActor.run {
-                if rep.aRecords.isEmpty && rep.aaaaRecords.isEmpty
-                    && rep.registrar == nil && rep.certNotAfter == nil {
+                if noData {
                     failed = "這個網域查不到任何資料，確認一下拼字（不用打 https:// 或路徑）"
                 }
-                report = rep
+                report = snap
                 loading = false
                 stage = ""
                 UINotificationFeedbackGenerator().notificationOccurred(.success)

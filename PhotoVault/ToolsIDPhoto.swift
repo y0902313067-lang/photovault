@@ -12,6 +12,9 @@ struct IDSpec: Identifiable, Hashable {
     let mm: String
     let px: CGSize
 
+    static func == (l: IDSpec, r: IDSpec) -> Bool { l.id == r.id }
+    func hash(into h: inout Hasher) { h.combine(id) }
+
     static let presets: [IDSpec] = [
         IDSpec(id: "one", name: "一寸照", mm: "25 × 35 mm", px: CGSize(width: 295, height: 413)),
         IDSpec(id: "two", name: "兩寸照", mm: "35 × 49 mm", px: CGSize(width: 413, height: 579)),
@@ -372,18 +375,19 @@ struct IDPhotoView: View {
                     cut = IDRenderer.cutout(src)
                 }
             }
+            let cutFinal = cut
             let face = IDRenderer.faceRect(of: src)
             let output = IDRenderer.compose(photo: src,
                                             face: face,
                                             spec: currentSpec,
                                             backdrop: currentBackdrop.color,
-                                            subject: cut)
+                                            subject: cutFinal)
 
             await MainActor.run {
-                subject = cut
+                subject = cutFinal
                 result = output
                 working = false
-                message = (wantCutout && cut == nil)
+                message = (wantCutout && cutFinal == nil)
                     ? "這張沒能自動去背（可能人物佔比太小），先用原背景排出成品"
                     : nil
 

@@ -116,7 +116,7 @@ final class RecorderModel: NSObject, ObservableObject, AVAudioRecorderDelegate {
             elapsed = 0
             message = nil
             timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self = self, let rec = self.recorder else { return }
                     self.elapsed = rec.currentTime
                 }
