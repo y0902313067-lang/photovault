@@ -96,6 +96,9 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
         didSet { UserDefaults.standard.set(unit.rawValue, forKey: "pv_speed_unit") }
     }
 
+    /// 行車預警引擎（由畫面注入，跟本頁共用同一份定位）
+    weak var alertEngine: DriveAlertEngine?
+
     private let lm = CLLocationManager()
     private var timer: Timer?
     private var segStart: Date?
@@ -325,6 +328,9 @@ final class MotionSpeedModel: NSObject, ObservableObject, CLLocationManagerDeleg
             if candidate > maxSpeed, candidate < 130 { maxSpeed = candidate }
         }
 
+        // 行車預警：把同一份定位餵給速限／測速照相／區間測速引擎
+        alertEngine?.update(location: loc, speedMPS: max(current, 0))
+
         guard running, !paused, loc.horizontalAccuracy < 55 else {
             if lastPoint == nil { lastPoint = loc }
             return
@@ -474,6 +480,7 @@ struct RouteMapView: UIViewRepresentable {
 
 struct MotionSpeedView: View {
     @StateObject private var model = MotionSpeedModel()
+    @StateObject private var drive = DriveAlertEngine()
 
     var body: some View {
         TTScreen(title: "源隼測速",
@@ -485,6 +492,9 @@ struct MotionSpeedView: View {
                 permissionPanel
             } else {
                 gaugeBlock
+                limitBlock
+                cameraAlertBlock
+                intervalBlock
                 unitBlock
                 statsBlock
                 mapBlock
@@ -492,8 +502,16 @@ struct MotionSpeedView: View {
                 historyBlock
             }
         }
-        .onAppear { model.startUpdates() }
-        .onDisappear { model.stopUpdates() }
+        .onAppear {
+            DriveData.shared.prepare {}
+            DriveVoice.shared.activateSession()
+            model.alertEngine = drive
+            model.startUpdates()
+        }
+        .onDisappear {
+            model.alertEngine = nil
+            model.stopUpdates()
+        }
         .preferredColorScheme(.dark)
     }
 
@@ -541,6 +559,223 @@ struct MotionSpeedView: View {
             }
             .padding(.vertical, 6)
         }
+    }
+
+    // MARK: 速限（新增）
+
+    private var nowKmh: Double { max(model.current, 0) * 3.6 }
+
+    private var limitBlock: some View {
+        TTPanel(accent: drive.overSpeed ? TT.rose : TT.teal) {
+            VStack(spacing: 12) {
+                HStack(spacing: 14) {
+                    limitSign
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(drive.limitFromInterval ? "區間測速速限" : "路段速限")
+                            .font(.system(size: 10, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(.white.opacity(0.36))
+                        if drive.limit != nil {
+                            Text(drive.overSpeed ? "超速中" : String(format: "現在 %.0f km/h", nowKmh))
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(drive.overSpeed ? TT.rose : TT.mint)
+                        } else {
+                            Text(drive.dataReady ? "未收錄" : "載入圖資…")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.5))
+                            Text("這條路段沒有速限資料，不拿別條路充數")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(.white.opacity(0.3))
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { drive.voiceOn.toggle() }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: drive.voiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 10.5, weight: .semibold))
+                            Text(drive.voiceOn ? "語音播報" : "已靜音")
+                                .font(.system(size: 10.5, weight: .semibold))
+                        }
+                        .foregroundStyle(drive.voiceOn ? TT.ink : .white.opacity(0.6))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule().fill(drive.voiceOn ? TT.amber.opacity(0.9) : Color.white.opacity(0.06))
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 0)
+
+                    if drive.dataReady {
+                        Text("相機 \(drive.cameraCount) · 區間 \(drive.intervalCount)")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.white.opacity(0.28))
+                    }
+                }
+            }
+        }
+    }
+
+    private var limitSign: some View {
+        ZStack {
+            Circle().fill(Color(red: 0.96, green: 0.96, blue: 0.96))
+            Circle().strokeBorder(Color(red: 0.85, green: 0.15, blue: 0.19), lineWidth: 6)
+            if let l = drive.limit {
+                Text("\(l)")
+                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(red: 0.07, green: 0.07, blue: 0.09))
+            } else {
+                Text("--")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.black.opacity(0.32))
+            }
+        }
+        .frame(width: 66, height: 66)
+        .shadow(color: (drive.overSpeed ? TT.rose : TT.teal).opacity(0.35), radius: 10)
+    }
+
+    // MARK: 測速照相預警（新增，觸發時才出現）
+
+    private var cameraAlertBlock: some View {
+        Group {
+            if let c = drive.cameraAlert {
+                TTPanel(accent: c.near ? TT.rose : TT.amber, padding: 13) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(c.near ? TT.rose : TT.amber)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill((c.near ? TT.rose : TT.amber).opacity(0.14))
+                            )
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(c.near ? "測速照相就在前方" : "前方測速照相")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
+                            Text(c.addr.isEmpty ? String(format: "%.0f 公尺", c.distance)
+                                                : String(format: "%.0f 公尺 · %@", c.distance, c.addr))
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        VStack(spacing: 1) {
+                            Text("\(c.limit)")
+                                .font(.system(size: 19, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(c.near ? TT.rose : TT.amber)
+                            Text("km/h")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: 區間測速預警（新增，接近／進行中才出現）
+
+    private var intervalBlock: some View {
+        Group {
+            if let run = drive.intervalLive {
+                TTPanel(accent: run.over ? TT.rose : TT.violet, padding: 13) {
+                    VStack(spacing: 9) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(run.over ? TT.rose : TT.violet)
+                            Text("區間測速進行中")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
+                            Spacer(minLength: 0)
+                            Text(run.name)
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(.white.opacity(0.35))
+                                .lineLimit(1)
+                        }
+                        HStack(spacing: 8) {
+                            intervalCell("限速", "\(run.limit)", "km/h",
+                                         run.over ? TT.rose : TT.violet)
+                            intervalCell("目前平均", String(format: "%.0f", run.avg), "km/h",
+                                         run.over ? TT.rose : TT.mint)
+                            intervalCell("已行駛", String(format: "%.2f", run.travelled / 1000), "km",
+                                         TT.teal)
+                            intervalCell("剩餘", String(format: "%.2f", run.remaining / 1000), "km",
+                                         TT.blue)
+                        }
+                        if run.over {
+                            Text("平均速度超過限速，通過終點會被開單")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(TT.rose.opacity(0.9))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            } else if let ap = drive.intervalApproach {
+                TTPanel(accent: TT.violet, padding: 13) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(TT.violet)
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(TT.violet.opacity(0.14)))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("前方進入區間測速")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
+                            Text(String(format: "%.0f 公尺 · %@", ap.distance, ap.name))
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        Text("限 \(ap.limit)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(TT.ink)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(TT.violet.opacity(0.9)))
+                    }
+                }
+            }
+        }
+    }
+
+    private func intervalCell(_ title: String, _ value: String, _ unit: String,
+                              _ accent: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 8.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.32))
+                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.system(size: 7.5))
+                    .foregroundStyle(.white.opacity(0.25))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 
     // MARK: 單位
