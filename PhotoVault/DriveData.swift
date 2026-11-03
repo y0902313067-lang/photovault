@@ -245,7 +245,8 @@ final class DriveData {
     /// 該座標的路段速限；查不到回 nil
     func limitAt(_ lat: Double, _ lon: Double) -> Int? { limitHit(lat, lon)?.speed }
 
-    func limitHit(_ lat: Double, _ lon: Double) -> LimitHit? {
+    /// - Parameter speedKmh: 當前車速，用於高架／平面重疊時判斷走哪一層
+    func limitHit(_ lat: Double, _ lon: Double, speedKmh: Double = 0) -> LimitHit? {
         if tiles.isEmpty { return nil }
         let ti = Int(floor(lat / DriveData.TILE))
         let tj = Int(floor(lon / DriveData.TILE))
@@ -255,6 +256,8 @@ final class DriveData {
         var bestScore = Double.greatestFiniteMagnitude
         var near: [(d: Double, s: Int, lv: Int)] = []
         near.reserveCapacity(DriveData.EST_NEIGHBORS)
+        // 高架與平面常在同一座標重疊：高速行駛偏向等級較高的道路，低速偏向平面
+        let levelBias = speedKmh > 65 ? 6.0 : 1.5
 
         for di in -1...1 {
             for dj in -1...1 {
@@ -270,8 +273,7 @@ final class DriveData {
                         if dd < d { d = dd }
                         i += 2
                     }
-                    // 高架與平面重疊時優先採等級較高的道路
-                    let score = d - Double(seg.level) * 6
+                    let score = d - Double(seg.level) * levelBias
                     if score < bestScore {
                         bestScore = score
                         bestLimit = seg.limit
@@ -291,6 +293,8 @@ final class DriveData {
 
         // ② 沒有實測 → 用同一條路 / 同級道路的鄰近路段推定
         let refLevel = bestLevel
+        // 低速行駛卻只找得到快速道路／高架（level ≥ 7）：很可能實際走在平面道路，不硬套
+        if refLevel >= 7, speedKmh <= 65 { return nil }
         let same = near.filter { abs($0.lv - refLevel) <= 1 }
         guard !same.isEmpty else { return nil }
         var weight: [Int: Double] = [:]

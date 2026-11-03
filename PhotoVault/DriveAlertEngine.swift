@@ -175,7 +175,7 @@ final class DriveAlertEngine: ObservableObject {
             return
         }
 
-        let hit = data.limitHit(lat, lon)
+        let hit = data.limitHit(lat, lon, speedKmh: speedKmh)
         var found = hit?.speed
         var est = hit?.estimated ?? false
         if est, !estimateOn { found = nil; est = false }
