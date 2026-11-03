@@ -44,6 +44,10 @@ struct PublicUser: Identifiable, Equatable {
     let avatar: String?
     let level: MemberLevel
     let titles: [String]
+    /// 對方自己排的稱號順序（存在雲端，換機也不會跑掉）
+    var titleOrder: [String] = []
+    /// 對方選擇不放上主頁的稱號
+    var titleHidden: [String] = []
 }
 
 /// 非隔離的常數，避免跨 actor 取值
@@ -165,7 +169,9 @@ enum SocialAPI {
         let f = enc("user=\"\(userID)\"")
         guard let obj = try? await request("GET",
             "/api/collections/titles/records?perPage=50&filter=\(f)&sort=created", token: token) else { return [] }
+        // 以 __ 開頭的是系統用的保留 key（例如編排資料），不是真的稱號
         return items(obj).compactMap { $0["title_key"] as? String }
+            .filter { !$0.hasPrefix("__") }
     }
 
     static func grantTitle(userID: String, key: String, source: String, token: String?) async {
@@ -249,7 +255,7 @@ enum SocialAPI {
         guard let obj = try? await request("GET",
             "/api/collections/posts/records?perPage=\(limit)&sort=-created",
             token: token) else { return [] }
-        let raw = items(obj)
+        let raw = items(obj).filter { !TitleLayoutSync.isLayoutPost($0) }
         let dec = await decorate(raw, token: token)
         return dec.map { d in
             FeedPost(id: d.id, userID: d.userID, profileID: d.profileID, nickname: d.nickname, avatar: d.avatar,
@@ -484,16 +490,89 @@ enum SocialAPI {
         }
     }
 
+    // MARK: - 稱號編排的雲端同步
+    //
+    // 順序與「哪些不放主頁」如果只存在本機，別人（以及自己換手機後）
+    // 看到的就是伺服器回傳的原始順序，不是自己排的那個。
+    // 後端沒有專門欄位可用，這裡借一篇動態記錄來存：
+    // text 以固定標記開頭，App 讀動態時會把這種記錄整條濾掉，不會出現在牆上。
+
+    enum TitleLayoutSync {
+        static let marker = "PVLAYOUT1|"
+        /// 只用來搜尋（不含特殊字元，避免 filter 語法出問題）
+        static let searchKey = "PVLAYOUT1"
+
+        struct Payload {
+            var id: String = ""
+            var order: [String] = []
+            var hidden: [String] = []
+        }
+
+        static func isLayoutPost(_ it: [String: Any]) -> Bool {
+            ((it["text"] as? String) ?? "").hasPrefix(marker)
+        }
+
+        static func encode(order: [String], hidden: [String]) -> String {
+            let body: [String: Any] = ["o": order, "h": hidden]
+            guard let d = try? JSONSerialization.data(withJSONObject: body),
+                  let s = String(data: d, encoding: .utf8) else { return marker + "{}" }
+            return marker + s
+        }
+
+        static func decode(_ text: String) -> ([String], [String])? {
+            guard text.hasPrefix(marker) else { return nil }
+            let json = String(text.dropFirst(marker.count))
+            guard let d = json.data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+            let o = (obj["o"] as? [String]) ?? []
+            let h = (obj["h"] as? [String]) ?? []
+            return (o, h)
+        }
+    }
+
+    static func loadTitleLayout(userID: String, token: String?) async -> TitleLayoutSync.Payload? {
+        let f = enc("user=\"\(userID)\" && text ~ \"\(TitleLayoutSync.searchKey)\"")
+        guard let obj = try? await request("GET",
+            "/api/collections/posts/records?perPage=10&sort=-created&filter=\(f)",
+            token: token) else { return nil }
+        for it in items(obj) {
+            guard let text = it["text"] as? String,
+                  let id = it["id"] as? String,
+                  let (o, h) = TitleLayoutSync.decode(text) else { continue }
+            return TitleLayoutSync.Payload(id: id, order: o, hidden: h)
+        }
+        return nil
+    }
+
+    @discardableResult
+    static func saveTitleLayout(userID: String, recordID: String?,
+                                order: [String], hidden: [String],
+                                token: String?) async -> String? {
+        let text = TitleLayoutSync.encode(order: order, hidden: hidden)
+        if let recordID, !recordID.isEmpty {
+            if let obj = try? await request("PATCH", "/api/collections/posts/records/\(recordID)",
+                                            json: ["text": text], token: token),
+               let id = obj["id"] as? String { return id }
+        }
+        if let obj = try? await request("POST", "/api/collections/posts/records",
+                                        json: ["user": userID, "text": text], token: token),
+           let id = obj["id"] as? String { return id }
+        return nil
+    }
+
     static func loadPublicUser(profileID: String, token: String?) async -> PublicUser? {
         guard let obj = try? await request("GET",
             "/api/collections/profiles/records/\(profileID)", token: token),
               let uid = obj["user"] as? String else { return nil }
         let level = await loadLevel(userID: uid, token: token)
         let titles = await loadTitles(userID: uid, token: token)
+        let layout = await loadTitleLayout(userID: uid, token: token)
         return PublicUser(id: profileID, userID: uid,
                           nickname: (obj["nickname"] as? String) ?? "用戶",
                           avatar: obj["avatar"] as? String,
-                          level: level, titles: Titles.resolved(titles, level: level))
+                          level: level, titles: Titles.resolved(titles, level: level),
+                          titleOrder: layout?.order ?? [],
+                          titleHidden: layout?.hidden ?? [])
     }
 
     static func loadUserPosts(userID: String, token: String?, limit: Int = 30) async -> [FeedPost] {
@@ -501,7 +580,7 @@ enum SocialAPI {
         guard let obj = try? await request("GET",
             "/api/collections/posts/records?perPage=\(limit)&sort=-created&filter=\(f)",
             token: token) else { return [] }
-        let raw = items(obj)
+        let raw = items(obj).filter { !TitleLayoutSync.isLayoutPost($0) }
         let dec = await decorate(raw, token: token)
         return dec.map { d in
             FeedPost(id: d.id, userID: d.userID, profileID: d.profileID, nickname: d.nickname, avatar: d.avatar,

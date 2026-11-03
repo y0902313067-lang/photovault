@@ -2,6 +2,13 @@ import SwiftUI
 import PhotosUI
 
 // MARK: - 聊天室（公開大廳）
+//
+// v38 效能改版：
+// 1. 畫面只掛最近 220 則（資料仍在記憶體 5000 則裡），要更早的按一下往上載
+//    —— 原本一次把 5000 則全塞進 LazyVStack，每次重繪、每幀滾動都要處理 5000 個元素
+// 2. 每一則訊息做成獨立的 Equatable 視圖，內容沒變就整行跳過重繪
+// 3. 只有「使用者停在底部」時才自動跟隨新訊息，往上翻歷史不會每 6 秒被拽回底部
+// 4. 圖片與頭像一律降採樣解碼（見 RemoteImage.swift），不再整張原圖解開
 
 struct ChatRoomView: View {
     @EnvironmentObject var store: AppStore
@@ -17,40 +24,98 @@ struct ChatRoomView: View {
     @State private var guest: String?
     @State private var loading = true
     @State private var timer: Timer?
-    /// 目前畫面上最多掛幾則（本機快取 5000，全掛上去會拖慢捲動）
-    private let shownLimit = ChatCache.diskLimit
+    @State private var stickToBottom = true
+    @State private var didInitialScroll = false
+
+    /// 一次渲染幾則（往上按一下再加一頁）
+    private let pageSize = 220
+    @State private var renderCount = 220
+
+    private let bottomID = "pv.chat.bottom"
+
+    private var rendered: ArraySlice<ChatMessage> {
+        messages.suffix(max(pageSize, renderCount))
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(messages) { m in
-                                messageRow(m)
-                                    .id(m.id)
-                            }
-                            if messages.isEmpty && !loading {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "bubble.left.and.bubble.right")
-                                        .font(.system(size: 26))
-                                        .foregroundStyle(.white.opacity(0.16))
-                                    Text("大廳還很安靜，說句話吧")
-                                        .font(.system(size: 12.5))
-                                        .foregroundStyle(.white.opacity(0.3))
+                    ZStack(alignment: .bottomTrailing) {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 14) {
+                                if messages.count > rendered.count {
+                                    loadEarlierBar(proxy)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 60)
+
+                                ForEach(rendered) { m in
+                                    ChatRow(m: m,
+                                            mine: m.userID == (store.authUserID ?? ""),
+                                            myLevel: store.level,
+                                            myProfileID: store.profileID ?? "",
+                                            myAvatar: store.avatarImage,
+                                            onGuest: { pid in
+                                                if !pid.isEmpty { guest = pid }
+                                            })
+                                    .equatable()
+                                    .id(m.id)
+                                }
+
+                                if messages.isEmpty && !loading {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "bubble.left.and.bubble.right")
+                                            .font(.system(size: 26))
+                                            .foregroundStyle(.white.opacity(0.16))
+                                        Text("大廳還很安靜，說句話吧")
+                                            .font(.system(size: 12.5))
+                                            .foregroundStyle(.white.opacity(0.3))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 60)
+                                }
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id(bottomID)
+                                    .onAppear { stickToBottom = true }
                             }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 14)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                    }
-                    .onChange(of: messages.count) { _ in
-                        if let last = messages.last {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(last.id, anchor: .bottom)
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 8)
+                                .onChanged { v in
+                                    // 往上拖就不要再自動跟隨
+                                    if v.translation.height > 10 { stickToBottom = false }
+                                }
+                        )
+                        .onChange(of: messages.count) { _ in
+                            guard stickToBottom || !didInitialScroll else { return }
+                            scrollDown(proxy, animated: didInitialScroll)
+                            didInitialScroll = true
+                        }
+
+                        if !stickToBottom && !messages.isEmpty {
+                            Button {
+                                stickToBottom = true
+                                scrollDown(proxy, animated: true)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 11, weight: .heavy))
+                                    Text("最新")
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                }
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 12)
+                                .frame(height: 30)
+                                .background(Capsule().fill(Color(red: 0.10, green: 0.13, blue: 0.18)))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+                                .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
                             }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 14)
+                            .padding(.bottom, 10)
                         }
                     }
                 }
@@ -89,72 +154,40 @@ struct ChatRoomView: View {
 
     struct GuestBox: Identifiable { let id: String }
 
-    // MARK: 一則訊息
+    // MARK: 往上載入更早
 
-    private func messageRow(_ m: ChatMessage) -> some View {
-        let mine = m.userID == (store.authUserID ?? "")
-        return HStack(alignment: .top, spacing: 9) {
-            if mine { Spacer(minLength: 40) }
-
-            if !mine {
-                Button { if !m.profileID.isEmpty { guest = m.profileID } } label: {
-                    AvatarBubble(profileID: m.profileID, file: m.avatar, size: 38, ring: m.level)
+    private func loadEarlierBar(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            let anchor = rendered.first?.id
+            renderCount = min(messages.count, renderCount + pageSize)
+            if let anchor {
+                DispatchQueue.main.async {
+                    proxy.scrollTo(anchor, anchor: .top)
                 }
-                .buttonStyle(.plain)
             }
-
-            VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(m.nickname)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                    // 自己發的那條用本機目前等級，避免伺服器留有舊記錄時少顯示一階
-                    LevelTagInline(level: mine ? store.level : m.level)
-                }
-                .frame(maxWidth: mine ? .infinity : nil,
-                       alignment: mine ? .trailing : .leading)
-
-                if !m.text.isEmpty {
-                    Text(m.text)
-                        .font(.system(size: 14.5))
-                        .foregroundStyle(.white.opacity(0.94))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(mine ? TT.mint.opacity(0.16) : Color.white.opacity(0.07))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(mine ? TT.mint.opacity(0.28)
-                                                   : Color.white.opacity(0.06),
-                                              lineWidth: 0.8)
-                        )
-                }
-
-                if let img = m.image,
-                   let url = SocialAPI.fileURL(collection: "chat", record: m.id, file: img) {
-                    CachedImage(url: url, placeholder: AnyView(
-                        ZStack {
-                            Color.white.opacity(0.05)
-                            ProgressView().tint(.white.opacity(0.35))
-                        }
-                    ))
-                    .frame(width: 180, height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-
-                Text(shortTime(m.created))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.white.opacity(0.22))
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 10, weight: .bold))
+                Text("載入更早的訊息")
+                    .font(.system(size: 11.5, weight: .medium))
             }
+            .foregroundStyle(.white.opacity(0.45))
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(Capsule().fill(Color.white.opacity(0.05)))
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
 
-            if mine {
-                AvatarBubble(profileID: store.profileID ?? "", file: nil,
-                             size: 38, ring: store.level, localImage: store.avatarImage)
+    private func scrollDown(_ proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(bottomID, anchor: .bottom)
             }
-
-            if !mine { Spacer(minLength: 40) }
+        } else {
+            proxy.scrollTo(bottomID, anchor: .bottom)
         }
     }
 
@@ -246,7 +279,7 @@ struct ChatRoomView: View {
     /// 首次進場 / 手動刷新：抓最近 300 則（含首頁一次帶回），併進本機快取
     private func load() async {
         // 先用本機快取把畫面填上，開聊天室不用先空等網路
-        let cached = ChatCache.shared.tail(shownLimit)
+        let cached = ChatCache.shared.tail(ChatCache.diskLimit)
         if !cached.isEmpty {
             await MainActor.run {
                 messages = cached
@@ -262,7 +295,7 @@ struct ChatRoomView: View {
         } else {
             list = ChatCache.shared.merge(recent)
         }
-        let tail = Array(list.suffix(shownLimit))
+        let tail = Array(list.suffix(ChatCache.diskLimit))
         await MainActor.run {
             messages = tail
             loading = false
@@ -280,8 +313,10 @@ struct ChatRoomView: View {
 
         await MainActor.run {
             messages.append(contentsOf: added)
-            if messages.count > shownLimit {
-                messages.removeFirst(messages.count - shownLimit)
+            if messages.count > ChatCache.diskLimit {
+                let drop = messages.count - ChatCache.diskLimit
+                messages.removeFirst(drop)
+                renderCount = max(pageSize, renderCount - drop)
             }
         }
     }
@@ -315,6 +350,7 @@ struct ChatRoomView: View {
                     input = ""
                     attach = nil
                     sending = false
+                    stickToBottom = true
                 }
                 // 只補抓新的那幾條，不再整批重載
                 await poll()
@@ -324,6 +360,94 @@ struct ChatRoomView: View {
                     tip = error.localizedDescription
                 }
             }
+        }
+    }
+}
+
+// MARK: - 單一則訊息
+//
+// 獨立成 Equatable 視圖：訊息內容沒變時整行不做 body 求值，
+// 滑動與輪詢時省下大量重繪。
+
+private struct ChatRow: View, Equatable {
+    let m: ChatMessage
+    let mine: Bool
+    let myLevel: MemberLevel
+    let myProfileID: String
+    let myAvatar: UIImage?
+    let onGuest: (String) -> Void
+
+    static func == (a: ChatRow, b: ChatRow) -> Bool {
+        a.m == b.m
+            && a.mine == b.mine
+            && a.myLevel == b.myLevel
+            && a.myProfileID == b.myProfileID
+            && a.myAvatar === b.myAvatar
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            if mine { Spacer(minLength: 40) }
+
+            if !mine {
+                Button { onGuest(m.profileID) } label: {
+                    AvatarBubble(profileID: m.profileID, file: m.avatar, size: 38, ring: m.level)
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(m.nickname)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                    // 自己發的那條用本機目前等級，避免伺服器留有舊記錄時少顯示一階
+                    LevelTagInline(level: mine ? myLevel : m.level)
+                }
+                .frame(maxWidth: mine ? .infinity : nil,
+                       alignment: mine ? .trailing : .leading)
+
+                if !m.text.isEmpty {
+                    Text(m.text)
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(.white.opacity(0.94))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(mine ? TT.mint.opacity(0.16) : Color.white.opacity(0.07))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(mine ? TT.mint.opacity(0.28)
+                                                   : Color.white.opacity(0.06),
+                                              lineWidth: 0.8)
+                        )
+                }
+
+                if let img = m.image,
+                   let url = SocialAPI.fileURL(collection: "chat", record: m.id, file: img) {
+                    CachedImage(url: url, maxPixel: 380, placeholder: AnyView(
+                        ZStack {
+                            Color.white.opacity(0.05)
+                            ProgressView().tint(.white.opacity(0.35))
+                        }
+                    ))
+                    .frame(width: 180, height: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                Text(shortTime(m.created))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.white.opacity(0.22))
+            }
+
+            if mine {
+                AvatarBubble(profileID: myProfileID, file: nil,
+                             size: 38, ring: myLevel, localImage: myAvatar)
+            }
+
+            if !mine { Spacer(minLength: 40) }
         }
     }
 }

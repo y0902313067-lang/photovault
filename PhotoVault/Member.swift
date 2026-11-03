@@ -309,7 +309,8 @@ struct MemberPill: View {
         .overlay(
             Capsule().strokeBorder(strokeColor, lineWidth: 0.8)
         )
-        .shadow(color: shadowColor, radius: compact ? 3 : 5)
+        // 列表裡的小標籤不畫陰影：聊天室動輒數十行，陰影是離屏渲染，滾動時很吃效能
+        .shadow(color: compact ? .clear : shadowColor, radius: compact ? 0 : 5)
     }
 
     private var textColor: Color {

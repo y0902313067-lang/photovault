@@ -34,7 +34,7 @@ struct AvatarBubble: View {
                     .frame(width: size, height: size)
                     .clipShape(Circle())
             } else if let file, let url = SocialAPI.fileURL(collection: "profiles", record: profileID, file: file) {
-                CachedImage(url: url, placeholder: AnyView(
+                CachedImage(url: url, maxPixel: size * 3, placeholder: AnyView(
                     Image(systemName: "person.fill")
                         .font(.system(size: size * 0.40))
                         .foregroundStyle(.white.opacity(0.28))
@@ -369,6 +369,9 @@ struct ProfilePageView: View {
     @State private var showComposer = false
     @State private var showTitleEditor = false
     @StateObject private var titleLayout = TitleLayoutStore()
+    /// 雲端那條編排記錄的 id（避免每次改順序都新增一條）
+    @State private var layoutRecordID: String?
+    @State private var layoutPushTask: Task<Void, Never>?
     @State private var posts: [FeedPost] = []
     @State private var other: PublicUser?
     @State private var loading = true
@@ -446,6 +449,8 @@ struct ProfilePageView: View {
                 TitleLayoutEditor(owned: shownTitles, layout: titleLayout)
             }
             .task { await reload() }
+            .onChange(of: titleLayout.order) { _ in scheduleLayoutPush() }
+            .onChange(of: titleLayout.hidden) { _ in scheduleLayoutPush() }
             .onReceive(ticker) { _ in
                 guard isMe else { return }
                 Task { await store.refreshSocial() }
@@ -536,7 +541,11 @@ struct ProfilePageView: View {
     }
 
     private var visibleTitles: [String] {
-        isMe ? titleLayout.visible(shownTitles) : shownTitles
+        if isMe { return titleLayout.visible(shownTitles) }
+        // 別人的主頁：照對方自己排的順序，並濾掉他選擇不顯示的
+        return TitleLayoutStore.arrange(owned: shownTitles,
+                                        order: other?.titleOrder ?? [],
+                                        hidden: other?.titleHidden ?? [])
     }
 
     private var composeBar: some View {
@@ -607,6 +616,7 @@ struct ProfilePageView: View {
             await store.refreshSocial()
             let uid = store.authUserID ?? ""
             let token = store.authToken
+            await syncTitleLayout()
             let list = await SocialAPI.loadUserPosts(userID: uid, token: token)
             await MainActor.run {
                 posts = list
@@ -621,6 +631,49 @@ struct ProfilePageView: View {
                 posts = list
                 loading = false
             }
+        }
+    }
+
+    /// 本機編排 ⇄ 雲端：本機有設定就以本機為準推上去，本機是空的就拉雲端的下來
+    private func syncTitleLayout() async {
+        guard isMe, let uid = store.authUserID else { return }
+        let token = store.authToken
+        let remote = await SocialAPI.loadTitleLayout(userID: uid, token: token)
+
+        if let remote {
+            await MainActor.run { layoutRecordID = remote.id }
+            // 本機還沒排過（新裝或換機）→ 直接套用雲端那份
+            if titleLayout.isEmpty {
+                await MainActor.run {
+                    titleLayout.apply(order: remote.order, hidden: remote.hidden)
+                }
+                return
+            }
+            // 兩邊一樣就不用動
+            if remote.order == titleLayout.order, remote.hidden == titleLayout.hidden { return }
+        }
+        // 本機有設定就以本機為準，推上去
+        await pushTitleLayout()
+    }
+
+    private func pushTitleLayout() async {
+        guard isMe, let uid = store.authUserID else { return }
+        let id = await SocialAPI.saveTitleLayout(userID: uid,
+                                                 recordID: layoutRecordID,
+                                                 order: titleLayout.order,
+                                                 hidden: titleLayout.hidden,
+                                                 token: store.authToken)
+        if let id { await MainActor.run { layoutRecordID = id } }
+    }
+
+    /// 改一次順序不要每個拖動幀都上傳，停手約一秒再送
+    private func scheduleLayoutPush() {
+        guard isMe else { return }
+        layoutPushTask?.cancel()
+        layoutPushTask = Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            if Task.isCancelled { return }
+            await pushTitleLayout()
         }
     }
 

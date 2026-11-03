@@ -52,6 +52,24 @@ final class TitleLayoutStore: ObservableObject {
         order = []
         hidden = []
     }
+
+    /// 套用雲端存下來的編排（換手機、或本機還沒有任何設定時）
+    func apply(order newOrder: [String], hidden newHidden: [String]) {
+        if order != newOrder { order = newOrder }
+        if hidden != newHidden { hidden = newHidden }
+    }
+
+    /// 本機是否還沒有任何編排（首次使用）
+    var isEmpty: Bool { order.isEmpty && hidden.isEmpty }
+
+    /// 別人的主頁：照對方存下來的順序排，並濾掉他選擇不顯示的
+    static func arrange(owned: [String], order: [String], hidden: [String]) -> [String] {
+        let hiddenSet = Set(hidden)
+        var out = order.filter { owned.contains($0) && !hiddenSet.contains($0) }
+        let picked = Set(out)
+        for k in owned where !picked.contains(k) && !hiddenSet.contains(k) { out.append(k) }
+        return out
+    }
 }
 
 // MARK: - 編排介面
