@@ -115,13 +115,6 @@ final class AppStore: ObservableObject {
         for k in ["pv_saved_count", "pv_synced", "pv_pending"] { d.removeObject(forKey: k) }
         d.synchronize()
 
-        NotificationCenter.default.addObserver(forName: .pvLimitSegment, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.bumpTask("speed", add: 1) }
-        }
-        NotificationCenter.default.addObserver(forName: .pvNetDiag, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.bumpTask("diag", add: 1) }
-        }
-
         guard let pid = d.string(forKey: "pv_profile_id"), !pid.isEmpty else {
             return   // 从未注册过，才进注册页
         }

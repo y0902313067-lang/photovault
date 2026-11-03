@@ -273,7 +273,7 @@ struct TitleGrid: View {
     var body: some View {
         let cols = Array(repeating: GridItem(.flexible(), spacing: 6, alignment: .leading),
                          count: 3)
-        LazyVGrid(columns: cols, spacing: 6, alignment: .leading) {
+        LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
             ForEach(list.prefix(9)) { t in
                 TitleChip(title: t, size: 0.82)
                     .frame(maxWidth: .infinity, alignment: .leading)

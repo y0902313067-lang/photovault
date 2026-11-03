@@ -62,6 +62,12 @@ struct RootView: View {
         .onReceive(beat) { _ in
             if scenePhase == .active { silentPing() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pvLimitSegment)) { _ in
+            store.bumpTask("speed", add: 1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pvNetDiag)) { _ in
+            store.bumpTask("diag", add: 1)
+        }
     }
 
     @ViewBuilder

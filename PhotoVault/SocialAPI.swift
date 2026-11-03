@@ -381,7 +381,7 @@ enum SocialAPI {
 
         var titleMap: [String: [String]] = [:]
         if let obj = try? await request("GET",
-            "/api/collections/titles/records?perPage=200&filter=\(enc(filter))", token: token) {
+            "/api/collections/titles/records?perPage=100&filter=\(enc(filter))", token: token) {
             for it in items(obj) {
                 guard let uid = it["user"] as? String,
                       let k = it["title_key"] as? String else { continue }
