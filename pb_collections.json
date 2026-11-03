@@ -136,7 +136,7 @@
     "viewRule": "@request.auth.id != ''",
     "createRule": "@request.auth.id != ''",
     "updateRule": "@request.auth.id != ''",
-    "deleteRule": null,
+    "deleteRule": "@request.auth.id != ''",
     "fields": [
       {
         "name": "code",

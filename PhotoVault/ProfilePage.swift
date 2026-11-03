@@ -306,7 +306,6 @@ struct ProfilePageView: View {
     @State private var other: PublicUser?
     @State private var loading = true
     @State private var guestProfile = ""
-    @State private var avatarPicker = false
     private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     private var isMe: Bool { profileID == nil }
@@ -376,9 +375,6 @@ struct ProfilePageView: View {
             .sheet(isPresented: $showComposer) {
                 ComposerView { await reload() }
             }
-            .sheet(isPresented: $avatarPicker) {
-                AvatarPickerSheet()
-            }
             .task { await reload() }
             .onReceive(ticker) { _ in
                 guard isMe else { return }
@@ -391,9 +387,7 @@ struct ProfilePageView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
-            Button {
-                if isMe { avatarPicker = true }
-            } label: {
+            Group {
                 if isMe, let img = store.avatarImage {
                     ZStack {
                         if shownLevel.glow.hasGlow {
@@ -420,7 +414,6 @@ struct ProfilePageView: View {
                                  size: 96, ring: shownLevel)
                 }
             }
-            .buttonStyle(.plain)
             .padding(.top, 14)
 
             Text(shownName)
