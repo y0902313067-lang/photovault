@@ -235,12 +235,16 @@ final class DriveData {
         let estimated: Bool     // true = 由鄰近同級道路推定，非該路段實測標籤
     }
 
-    /// 精確命中判定（保留原本高架優先的加權：score = 距離 - 等級×6）
-    private static let EXACT_SCORE = 40.0
+    /// 精確命中判定：車子離路段這麼近，才算真的走在這條路上
+    private static let EXACT_DIST = 26.0
+    /// 高架／平面重疊時，兩層距離差在這以內才算「腳下兩條路」
+    private static let OVERLAP_SLACK = 25.0
     /// 推定時最多往外找多遠（公尺）
-    private static let EST_RADIUS = 2000.0
+    private static let EST_RADIUS = 260.0
     /// 推定參與投票的鄰近路段數
-    private static let EST_NEIGHBORS = 16
+    private static let EST_NEIGHBORS = 10
+    /// 推定至少要幾條同級路段才敢說話
+    private static let EST_MIN_SAMPLES = 3
 
     /// 該座標的路段速限；查不到回 nil
     func limitAt(_ lat: Double, _ lon: Double) -> Int? { limitHit(lat, lon)?.speed }
@@ -251,13 +255,16 @@ final class DriveData {
         let ti = Int(floor(lat / DriveData.TILE))
         let tj = Int(floor(lon / DriveData.TILE))
 
+        // 最近的一般路段
         var bestLimit: Int?
         var bestLevel = 0
-        var bestScore = Double.greatestFiniteMagnitude
+        var bestDist = Double.greatestFiniteMagnitude
+        // 最近的高等級道路（快速道路／國道），用來判斷高架重疊
+        var highLimit: Int?
+        var highLevel = 0
+        var highDist = Double.greatestFiniteMagnitude
         var near: [(d: Double, s: Int, lv: Int)] = []
         near.reserveCapacity(DriveData.EST_NEIGHBORS)
-        // 高架與平面常在同一座標重疊：高速行駛偏向等級較高的道路，低速偏向平面
-        let levelBias = speedKmh > 65 ? 6.0 : 1.5
 
         for di in -1...1 {
             for dj in -1...1 {
@@ -273,11 +280,15 @@ final class DriveData {
                         if dd < d { d = dd }
                         i += 2
                     }
-                    let score = d - Double(seg.level) * levelBias
-                    if score < bestScore {
-                        bestScore = score
+                    if d < bestDist {
+                        bestDist = d
                         bestLimit = seg.limit
                         bestLevel = seg.level
+                    }
+                    if seg.level >= 8, d < highDist {
+                        highDist = d
+                        highLimit = seg.limit
+                        highLevel = seg.level
                     }
                     if d < DriveData.EST_RADIUS {
                         pushNear(&near, d, seg.limit, seg.level)
@@ -286,23 +297,45 @@ final class DriveData {
             }
         }
 
-        // ① 該處確實有速限資料
-        if let b = bestLimit, bestScore < DriveData.EXACT_SCORE {
+        // ① 腳下確實有速限資料
+        if let b = bestLimit, bestDist <= DriveData.EXACT_DIST {
+            // 高架／平面上下重疊：車速快就當作走上面那層
+            if let h = highLimit, highLevel > bestLevel,
+               highDist <= max(DriveData.EXACT_DIST, bestDist + DriveData.OVERLAP_SLACK),
+               speedKmh >= 70 {
+                return LimitHit(speed: h, estimated: false)
+            }
+            // 明明是平面路段，但旁邊 25 公尺內的高速速限被拉進來 → 不採用
             return LimitHit(speed: b, estimated: false)
         }
 
         // ② 沒有實測 → 用同一條路 / 同級道路的鄰近路段推定
         let refLevel = bestLevel
-        // 低速行駛卻只找得到快速道路／高架（level ≥ 7）：很可能實際走在平面道路，不硬套
-        if refLevel >= 7, speedKmh <= 65 { return nil }
+        // 低速行駛卻只找得到快速道路／高架（level ≥ 8）：很可能實際走在平面道路，不硬套
+        if refLevel >= 8, speedKmh <= 65 { return nil }
         let same = near.filter { abs($0.lv - refLevel) <= 1 }
-        guard !same.isEmpty else { return nil }
+        guard same.count >= DriveData.EST_MIN_SAMPLES else { return nil }
         var weight: [Int: Double] = [:]
         for c in same {
-            weight[c.s, default: 0] += 1.0 / (1.0 + c.d / 60.0)
+            weight[c.s, default: 0] += 1.0 / (1.0 + c.d / 40.0)
         }
         guard let top = weight.max(by: { $0.value < $1.value }) else { return nil }
+        // 等級對不上就寧可不說：小路上推不出 70、平面道路上推不出 110
+        guard top.key <= levelCap(refLevel) else { return nil }
         return LimitHit(speed: top.key, estimated: true)
+    }
+
+    /// 這條等級的路，速限最多可能到多少（超過就是不合理的推定）
+    private func levelCap(_ level: Int) -> Int {
+        switch level {
+        case ...2: return 50
+        case 3...5: return 60
+        case 6: return 70
+        case 7: return 80
+        case 8, 9: return 90
+        case 10...13: return 110
+        default: return 60
+        }
     }
 
     /// 維護「最近的 N 條路段」

@@ -4,3 +4,4 @@ chk/
 build/
 *.xcarchive
 *.ipa
+*.bak

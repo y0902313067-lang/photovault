@@ -17,6 +17,26 @@ struct FeedPost: Identifiable, Equatable {
     let created: Date
 }
 
+/// 動態的留言
+struct PostComment: Identifiable, Equatable {
+    let id: String
+    let userID: String
+    let profileID: String
+    let nickname: String
+    let avatar: String?
+    let level: MemberLevel
+    let text: String
+    let created: Date
+}
+
+/// 一則動態的互動狀態：愛心數、自己有沒有按、留言
+struct PostSocial: Equatable {
+    var likes: Int = 0
+    var likedByMe: Bool = false
+    var myLikeID: String? = nil
+    var comments: [PostComment] = []
+}
+
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: String
     let userID: String
@@ -292,8 +312,9 @@ enum SocialAPI {
     // MARK: - 動態
 
     static func loadFeed(token: String?, limit: Int = 30) async -> [FeedPost] {
+        let f = enc("text !~ \"PV\"")
         guard let obj = try? await request("GET",
-            "/api/collections/posts/records?perPage=\(limit)&sort=-created",
+            "/api/collections/posts/records?perPage=\(limit)&sort=-created&filter=\(f)",
             token: token) else { return [] }
         let raw = items(obj).filter { !TitleLayoutSync.isLayoutPost($0) }
         let dec = await decorate(raw, token: token)
@@ -620,7 +641,7 @@ enum SocialAPI {
     }
 
     static func loadUserPosts(userID: String, token: String?, limit: Int = 30) async -> [FeedPost] {
-        let f = enc("user=\"\(userID)\"")
+        let f = enc("user=\"\(userID)\" && (text !~ \"PV\")")
         guard let obj = try? await request("GET",
             "/api/collections/posts/records?perPage=\(limit)&sort=-created&filter=\(f)",
             token: token) else { return [] }
@@ -634,6 +655,119 @@ enum SocialAPI {
                      video: fileList(d.raw, field: "video").first,
                      created: d.created)
         }
+    }
+
+    // MARK: - 動態互動（愛心 / 留言）
+    //
+    // 後端沒有專門的留言表、按讚表，這裡沿用動態集合的記錄：
+    // 一則留言 = 一條記錄，text 以 PVCMT1| 開頭，後面接 JSON；
+    // 一顆愛心 = 一條記錄，text 以 PVLIKE1| 開頭。
+    // 讀動態時把這類記錄整批濾掉，不會出現在牆上。
+
+    enum PostSocialSync {
+        static let commentMark = "PVCMT1|"
+        static let likeMark = "PVLIKE1|"
+
+        static func isSocial(_ text: String) -> Bool {
+            text.hasPrefix(commentMark) || text.hasPrefix(likeMark)
+        }
+
+        static func body(_ text: String) -> (post: String, value: String)? {
+            guard let bar = text.firstIndex(of: "|") else { return nil }
+            let json = String(text[text.index(after: bar)...])
+            guard let d = json.data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+                  let p = obj["p"] as? String else { return nil }
+            return (p, (obj["t"] as? String) ?? "")
+        }
+    }
+
+    /// 一次把這些動態的愛心與留言撈回來
+    static func loadSocial(postIDs: [String], myUserID: String?,
+                           token: String?) async -> [String: PostSocial] {
+        var out: [String: PostSocial] = [:]
+        for id in postIDs { out[id] = PostSocial() }
+        guard !postIDs.isEmpty else { return out }
+        let wanted = Set(postIDs)
+
+        var got: [[String: Any]] = []
+        var page = 1
+        while page <= 5 {
+            let f = enc("(text ~ \"PVCMT1\") || (text ~ \"PVLIKE1\")")
+            guard let obj = try? await request("GET",
+                "/api/collections/posts/records?perPage=200&page=\(page)&sort=created&filter=\(f)",
+                token: token) else { break }
+            let list = items(obj).filter {
+                guard let t = $0["text"] as? String else { return false }
+                return PostSocialSync.isSocial(t)
+            }
+            got.append(contentsOf: list)
+            let total = (obj["totalItems"] as? Int) ?? 0
+            if list.isEmpty || got.count >= total { break }
+            page += 1
+        }
+
+        var likeRaw: [[String: Any]] = []
+        var commentRaw: [[String: Any]] = []
+        for it in got {
+            guard let t = it["text"] as? String,
+                  let b = PostSocialSync.body(t), wanted.contains(b.post) else { continue }
+            if t.hasPrefix(PostSocialSync.likeMark) { likeRaw.append(it) } else { commentRaw.append(it) }
+        }
+
+        for it in likeRaw {
+            guard let id = it["id"] as? String,
+                  let uid = it["user"] as? String,
+                  let t = it["text"] as? String,
+                  let b = PostSocialSync.body(t) else { continue }
+            var s = out[b.post] ?? PostSocial()
+            s.likes += 1
+            if let myUserID, uid == myUserID {
+                s.likedByMe = true
+                s.myLikeID = id
+            }
+            out[b.post] = s
+        }
+
+        let dec = await decorate(commentRaw, token: token)
+        for d in dec {
+            guard let t = d.raw["text"] as? String,
+                  let b = PostSocialSync.body(t) else { continue }
+            var s = out[b.post] ?? PostSocial()
+            s.comments.append(PostComment(id: d.id, userID: d.userID, profileID: d.profileID,
+                                          nickname: d.nickname, avatar: d.avatar, level: d.level,
+                                          text: b.value, created: d.created))
+            out[b.post] = s
+        }
+        return out
+    }
+
+    /// 按愛心，回傳這顆愛心的記錄 id（之後取消要用）
+    static func addLike(postID: String, userID: String, token: String?) async -> String? {
+        let text = PostSocialSync.likeMark + "{\"p\":\"\(postID)\"}"
+        guard let obj = try? await request("POST", "/api/collections/posts/records",
+                                           json: ["user": userID, "text": text],
+                                           token: token) else { return nil }
+        return obj["id"] as? String
+    }
+
+    /// 留言，回傳記錄 id
+    static func addComment(postID: String, userID: String, text raw: String,
+                           token: String?) async -> String? {
+        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return nil }
+        guard let d = try? JSONSerialization.data(withJSONObject: ["p": postID, "t": clean]),
+              let json = String(data: d, encoding: .utf8) else { return nil }
+        let body = PostSocialSync.commentMark + json
+        guard let obj = try? await request("POST", "/api/collections/posts/records",
+                                           json: ["user": userID, "text": body],
+                                           token: token) else { return nil }
+        return obj["id"] as? String
+    }
+
+    /// 刪掉一條互動記錄（取消愛心、刪自己的留言）
+    static func removeSocial(id: String, token: String?) async {
+        _ = try? await request("DELETE", "/api/collections/posts/records/\(id)", token: token)
     }
 
     // MARK: - 任務

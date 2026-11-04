@@ -80,6 +80,18 @@ struct PostCard: View {
     var onAvatarTap: ((String) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
+    /// 這則動態的愛心與留言
+    var social: PostSocial = PostSocial()
+    var canInteract: Bool = false
+    var myUserID: String? = nil
+    var onToggleLike: (() -> Void)? = nil
+    var onSendComment: ((String) -> Void)? = nil
+    var onDeleteComment: ((PostComment) -> Void)? = nil
+
+    @State private var showComments = false
+    @State private var draft = ""
+    @FocusState private var inputFocused: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if showAuthor {
@@ -152,6 +164,12 @@ struct PostCard: View {
                let url = SocialAPI.fileURL(collection: "posts", record: post.id, file: video) {
                 VideoPlayerCard(url: url)
             }
+
+            actionBar
+
+            if showComments || !social.comments.isEmpty {
+                commentArea
+            }
         }
         .padding(14)
         .background(
@@ -167,6 +185,157 @@ struct PostCard: View {
                 Button(role: .destructive) { onDelete() } label: {
                     Label("刪除這則動態", systemImage: "trash")
                 }
+            }
+        }
+    }
+
+    // MARK: 愛心 / 留言
+
+    private var actionBar: some View {
+        HStack(spacing: 16) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onToggleLike?()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: social.likedByMe ? "heart.fill" : "heart")
+                        .font(.system(size: 15, weight: social.likedByMe ? .semibold : .regular))
+                        .foregroundStyle(social.likedByMe ? TT.rose : Color.white.opacity(0.55))
+                        .scaleEffect(social.likedByMe ? 1.08 : 1)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.5), value: social.likedByMe)
+                    Text("\(social.likes)")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(social.likedByMe ? TT.rose : Color.white.opacity(0.42))
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canInteract)
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeInOut(duration: 0.18)) { showComments.toggle() }
+                if !showComments { inputFocused = false }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bubble.left")
+                        .font(.system(size: 14.5, weight: .regular))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                    Text("\(social.comments.count)")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.42))
+                    if social.comments.isEmpty {
+                        Text("留言")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.white.opacity(0.32))
+                    }
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: 0.7)
+                .offset(y: -2)
+        }
+    }
+
+    private var commentArea: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if !social.comments.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(social.comments) { c in
+                        commentRow(c)
+                    }
+                }
+                .padding(.leading, 2)
+            } else {
+                Text("還沒有人留言，說兩句吧")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .padding(.vertical, 2)
+            }
+
+            if canInteract {
+                HStack(spacing: 8) {
+                    TextField("寫點什麼…", text: $draft, axis: .vertical)
+                        .lineLimit(1...3)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .focused($inputFocused)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .fill(Color.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.7)
+                        )
+
+                    Button {
+                        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { return }
+                        draft = ""
+                        inputFocused = true
+                        onSendComment?(text)
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                             ? Color.white.opacity(0.18) : TT.mint)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .padding(.top, 9)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func commentRow(_ c: PostComment) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            AvatarBubble(profileID: c.profileID, file: c.avatar, size: 24, ring: c.level)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(c.nickname)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                    Text(shortTime(c.created))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.white.opacity(0.26))
+                    Spacer(minLength: 4)
+                    if canInteract, c.userID == myUserID {
+                        Button {
+                            onDeleteComment?(c)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.3))
+                                .frame(width: 20, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Text(c.text)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -373,6 +542,7 @@ struct ProfilePageView: View {
     @State private var layoutRecordID: String?
     @State private var layoutPushTask: Task<Void, Never>?
     @State private var posts: [FeedPost] = []
+    @State private var social: [String: PostSocial] = [:]
     @State private var other: PublicUser?
     @State private var loading = true
     @State private var guestProfile = ""
@@ -603,7 +773,13 @@ struct ProfilePageView: View {
 
             ForEach(posts) { p in
                 PostCard(post: p, showAuthor: false,
-                         onDelete: isMe ? { Task { await remove(p) } } : nil)
+                         onDelete: isMe ? { Task { await remove(p) } } : nil,
+                         social: social[p.id] ?? PostSocial(),
+                         canInteract: store.authUserID != nil,
+                         myUserID: store.authUserID,
+                         onToggleLike: { Task { await toggleLike(p) } },
+                         onSendComment: { text in Task { await addComment(p, text) } },
+                         onDeleteComment: { c in Task { await removeComment(c, of: p.id) } })
             }
         }
     }
@@ -618,17 +794,23 @@ struct ProfilePageView: View {
             let token = store.authToken
             await syncTitleLayout()
             let list = await SocialAPI.loadUserPosts(userID: uid, token: token)
+            let smap = await SocialAPI.loadSocial(postIDs: list.map { $0.id },
+                                                  myUserID: store.authUserID, token: token)
             await MainActor.run {
                 posts = list
+                social = smap
                 loading = false
             }
         } else {
             let token = store.authToken
             let u = await SocialAPI.loadPublicUser(profileID: pid, token: token)
             let list = await SocialAPI.loadUserPosts(userID: u?.userID ?? guestProfile, token: token)
+            let smap = await SocialAPI.loadSocial(postIDs: list.map { $0.id },
+                                                  myUserID: store.authUserID, token: token)
             await MainActor.run {
                 other = u
                 posts = list
+                social = smap
                 loading = false
             }
         }
@@ -679,6 +861,82 @@ struct ProfilePageView: View {
 
     private func remove(_ p: FeedPost) async {
         await SocialAPI.deletePost(id: p.id, token: store.authToken)
-        await MainActor.run { posts.removeAll { $0.id == p.id } }
+        await MainActor.run {
+            posts.removeAll { $0.id == p.id }
+            social[p.id] = nil
+        }
+    }
+
+    // MARK: 愛心 / 留言
+
+    private func toggleLike(_ p: FeedPost) async {
+        guard let uid = store.authUserID, let token = store.authToken else { return }
+        var s = social[p.id] ?? PostSocial()
+        let wasLiked = s.likedByMe
+        let oldLikeID = s.myLikeID
+
+        // 先本機反應，手感不用等網路
+        s.likedByMe = !wasLiked
+        s.likes = max(0, s.likes + (wasLiked ? -1 : 1))
+        let optimistic = s
+        await MainActor.run { social[p.id] = optimistic }
+
+        if wasLiked {
+            if let id = oldLikeID { await SocialAPI.removeSocial(id: id, token: token) }
+            await MainActor.run { social[p.id]?.myLikeID = nil }
+        } else {
+            let id = await SocialAPI.addLike(postID: p.id, userID: uid, token: token)
+            await MainActor.run {
+                if let id {
+                    social[p.id]?.myLikeID = id
+                } else {
+                    // 沒寫成功就退回原樣，不要騙人
+                    var back = social[p.id] ?? PostSocial()
+                    back.likedByMe = false
+                    back.likes = max(0, back.likes - 1)
+                    social[p.id] = back
+                }
+            }
+        }
+    }
+
+    private func addComment(_ p: FeedPost, _ text: String) async {
+        guard let uid = store.authUserID, let token = store.authToken else { return }
+        let tempID = "tmp-\(UUID().uuidString)"
+        let temp = PostComment(id: tempID, userID: uid,
+                               profileID: store.profileID ?? "",
+                               nickname: store.nickname,
+                               avatar: nil,
+                               level: store.level,
+                               text: text, created: Date())
+        await MainActor.run {
+            var s = social[p.id] ?? PostSocial()
+            s.comments.append(temp)
+            social[p.id] = s
+        }
+
+        let id = await SocialAPI.addComment(postID: p.id, userID: uid, text: text, token: token)
+        await MainActor.run {
+            guard var s = social[p.id] else { return }
+            if let id {
+                if let i = s.comments.firstIndex(where: { $0.id == tempID }) {
+                    s.comments[i] = PostComment(id: id, userID: temp.userID,
+                                                profileID: temp.profileID,
+                                                nickname: temp.nickname, avatar: temp.avatar,
+                                                level: temp.level, text: temp.text,
+                                                created: temp.created)
+                }
+            } else {
+                s.comments.removeAll { $0.id == tempID }
+            }
+            social[p.id] = s
+        }
+    }
+
+    private func removeComment(_ c: PostComment, of postID: String) async {
+        await SocialAPI.removeSocial(id: c.id, token: store.authToken)
+        await MainActor.run {
+            social[postID]?.comments.removeAll { $0.id == c.id }
+        }
     }
 }

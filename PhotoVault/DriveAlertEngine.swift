@@ -53,8 +53,8 @@ final class DriveAlertEngine: ObservableObject {
     @Published var voiceOn: Bool = DriveVoice.shared.enabled {
         didSet { DriveVoice.shared.enabled = voiceOn }
     }
-    /// 沒有實測速限的路段，是否用同級道路鄰近路段推定（預設關）
-    @Published var estimateOn: Bool = UserDefaults.standard.object(forKey: "driveEstimateOn") as? Bool ?? false {
+    /// 沒有實測速限的路段，是否用同級道路鄰近路段推定（預設開）
+    @Published var estimateOn: Bool = UserDefaults.standard.object(forKey: "driveEstimateOn") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(estimateOn, forKey: "driveEstimateOn")
             candidateAt = Date.distantPast
@@ -86,6 +86,7 @@ final class DriveAlertEngine: ObservableObject {
     private var candidateAt: Date?
     private var candidateEst = false
     private var saidLimit: Int?
+    private var lastLimitAt = Date.distantPast
     private var overAt = Date.distantPast
     private var run: IntervalRun?
 
@@ -135,6 +136,7 @@ final class DriveAlertEngine: ObservableObject {
         candidateLimit = nil
         candidateAt = nil
         saidLimit = nil
+        lastLimitAt = Date.distantPast
         limit = nil
         limitFromInterval = false
         overSpeed = false
@@ -183,12 +185,17 @@ final class DriveAlertEngine: ObservableObject {
             candidateLimit = found
             candidateEst = est
             candidateAt = now
-            if found == nil { applyLimit(nil, fromInterval: false, estimated: false, now: now) }
+            if found == nil {
+                // 剛好在路口、或是路段接縫：先不要立刻把數字抹掉，留幾秒免得閃
+                if limit == nil || now.timeIntervalSince(lastLimitAt) > 6 {
+                    applyLimit(nil, fromInterval: false, estimated: false, now: now)
+                }
+            }
             return
         }
         guard let f = found, let at = candidateAt else { return }
-        // 連續 2.5 秒都在同一速限才確認，避免路口跳動
-        if now.timeIntervalSince(at) > 2.5 {
+        // 連續 1.2 秒都在同一速限才確認，避免路口跳動
+        if now.timeIntervalSince(at) > 1.2 {
             applyLimit(f, fromInterval: false, estimated: est, now: now)
         }
     }
@@ -202,9 +209,10 @@ final class DriveAlertEngine: ObservableObject {
         if overSpeed != over { overSpeed = over }
 
         if let v = v {
+            lastLimitAt = now
             if !fromInterval, saidLimit != v {
                 saidLimit = v
-                DriveVoice.shared.speak(DriveSpeech.limit(v))
+                // 語音只在測速照相、區間測速這兩件事上播報，路段速限只顯示不出聲
                 NotificationCenter.default.post(name: .pvLimitSegment, object: nil)
             }
         } else {
@@ -416,7 +424,7 @@ final class DriveAlertEngine: ObservableObject {
         if overSpeed != over { overSpeed = over }
         if over, now.timeIntervalSince(overAt) > 25 {
             overAt = now
-            DriveVoice.shared.speak(DriveSpeech.overSpeed(speedKmh, lim))
+            // 超速只在畫面上標紅，不出聲（語音只留測速照相與區間測速）
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         }
     }
