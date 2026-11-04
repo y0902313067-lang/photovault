@@ -253,7 +253,7 @@ final class DriveAlertEngine: ObservableObject {
                                       limit: hit.cam.limit,
                                       addr: hit.cam.addr,
                                       near: true))
-                DriveVoice.shared.speak(DriveSpeech.cameraNear(hit.cam.limit))
+                // 同一支相機只播一次語音，到點不再重複吵
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 return
             }

@@ -584,7 +584,7 @@ struct MotionSpeedView: View {
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(drive.overSpeed ? TT.rose : TT.mint)
                         } else {
-                            Text(drive.dataReady ? "非限速路段" : "載入圖資…")
+                            Text(drive.dataReady ? "此路段無速限資料" : "載入圖資…")
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
