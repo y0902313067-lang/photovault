@@ -20,34 +20,36 @@ struct TitleChip: View {
     private var h: CGFloat { 30 * size }
     private var icon: CGFloat { 18.5 * size }
 
-    /// 只有真的在畫面上、App 在前景、而且這階有光效時才跑時間軸
+    /// 只有真的在畫面上、App 在前景、而且這階有光效時才跑
     private var live: Bool {
         animated && onScreen && scenePhase == .active && title.tier >= 1
     }
 
     var body: some View {
-        if let banner = title.banner {
-            bannerBody(banner)
-        } else {
-            capsuleBody
+        Group {
+            if let banner = title.banner {
+                bannerBody(banner)
+            } else {
+                capsuleBody
+            }
         }
+        .onAppear { onScreen = true }
+        .onDisappear { onScreen = false }
     }
 
     // MARK: 名牌型（整條圖，文字與雕件都畫在圖裡）
     //
-    // 這幾款是限量名牌，不是「小圖標 + 文字」的膠囊，
-    // 所以直接照原圖比例擺，長得比一般稱號稍大一點，
-    // 光暈是圖裡自帶的，這裡只補一層會呼吸的外發光。
+    // 這幾款是限量名牌，不是「小圖標 + 文字」的膠囊。
+    // v44：牌面重做成統一 700x158（五款同寬同高），顯示高度直接跟普通稱號一致，
+    // 不再比一般稱號高一大截。字在圖裡佔比也調大了，縮到 30pt 仍然清楚。
 
-    /// 名牌型稱號的顯示高度
-    /// 這幾款的字是畫在圖裡的，佔圖高約 20%，所以要比一般膠囊大一點才看得清；
-    /// 太小的地方（動態卡片）就讓它維持在 30 上下，不去硬撐版面。
-    private var bannerH: CGFloat { max(30, 56 * size) }
+    /// 名牌型稱號的顯示高度 —— 跟普通膠囊同高，排在一起就是一樣大小
+    private var bannerH: CGFloat { max(24, h) }
 
     @ViewBuilder
     private func bannerBody(_ name: String) -> some View {
         if live {
-            TimelineView(.animation(minimumInterval: 1.0 / 24)) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 12)) { ctx in
                 bannerImage(name, t: ctx.date.timeIntervalSince1970)
             }
             .fixedSize()
@@ -56,6 +58,8 @@ struct TitleChip: View {
         } else {
             bannerImage(name, t: 0)
                 .fixedSize()
+                .onAppear { onScreen = true }
+                .onDisappear { onScreen = false }
         }
     }
 
@@ -81,14 +85,14 @@ struct TitleChip: View {
             .frame(height: bannerH)
             .background {
                 // ① 牌後柔光：橢圓徑向，範圍只到牌外一圈，不會形成方塊
-                RadialGradient(colors: [title.glow.opacity(0.34 + 0.26 * breathe),
+                RadialGradient(colors: [title.glow.opacity(0.50),
                                         title.glow.opacity(0.0)],
                                center: .center,
                                startRadius: 0,
                                endRadius: bannerH * 1.35)
                     .scaleEffect(x: 0.92, y: 0.82)
                     .blur(radius: bannerH * 0.10)
-                    .opacity(t == 0 ? 0.55 : 1)
+                    .opacity(t == 0 ? 0.8 : 1)
             }
             .overlay {
                 // ② 流光掃過（t == 0 時不畫，避免靜態場合多一層）
@@ -116,14 +120,10 @@ struct TitleChip: View {
                     }
                 }
             }
-            .shadow(color: title.glow.opacity(0.24 + 0.52 * breathe),
-                    radius: 3 + 9 * breathe, y: 0.5)
-            .shadow(color: title.glow.opacity(0.10 + 0.30 * breathe),
-                    radius: 9 + 17 * breathe)
-            .saturation(1.05)
-            .brightness(0.03)
-            .contrast(1.04)
-            .scaleEffect(1 + 0.008 * breathe)
+            // 外發光固定參數，不隨每一幀重算陰影；呼吸感改用整體 opacity 帶
+            .shadow(color: title.glow.opacity(0.46), radius: bannerH * 0.26, y: 0.5)
+            .shadow(color: title.glow.opacity(0.20), radius: bannerH * 0.60)
+            .opacity(t == 0 ? 1 : 0.93 + 0.07 * breathe)
             .offset(y: floatY)
     }
 
@@ -131,7 +131,7 @@ struct TitleChip: View {
         core
             .overlay {
                 if live {
-                    TimelineView(.animation(minimumInterval: 1.0 / 20)) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 12)) { ctx in
                         insideEffects(t: ctx.date.timeIntervalSince1970)
                     }
                     .allowsHitTesting(false)
@@ -140,7 +140,7 @@ struct TitleChip: View {
             .clipShape(Capsule())
             .overlay {
                 if live, title.tier >= 6 {
-                    TimelineView(.animation(minimumInterval: 1.0 / 20)) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 12)) { ctx in
                         shardEffects(t: ctx.date.timeIntervalSince1970)
                     }
                     .padding(-10 * size)
@@ -271,16 +271,26 @@ struct TitleChip: View {
 
     /// 環形星芒
     private func starField(angle: Double) -> some View {
-        ZStack {
-            ForEach(0..<(title.tier >= 6 ? 12 : (title.tier >= 5 ? 10 : 8)), id: \.self) { i in
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: (i == 0 ? 3.4 : 2.4) * (title.tier >= 5 ? 1.18 : 1) * size,
-                           height: (i == 0 ? 3.4 : 2.4) * (title.tier >= 5 ? 1.18 : 1) * size)
-                    .shadow(color: title.glow, radius: 3 * size)
-                    .offset(x: CGFloat(i % 2 == 0 ? 1 : -1) * (28 + CGFloat(i) * 7) * size,
-                            y: CGFloat(i % 3 == 0 ? -1 : 1) * (5 + CGFloat(i % 3) * 3) * size)
-                    .opacity(0.75)
+        // v44：改用 Canvas 一次畫完。原本是 8~12 個 Circle 各帶一個 blur 陰影再整層旋轉，
+        // 主頁二十幾個稱號就是每幀兩三百個模糊圓，是滾動卡頓的主因。
+        Canvas { ctx, sz in
+            let n = title.tier >= 6 ? 12 : (title.tier >= 5 ? 10 : 8)
+            let base: CGFloat = title.tier >= 5 ? 1.18 : 1.0
+            for i in 0..<n {
+                let r = (i == 0 ? 3.4 : 2.4) * base * size
+                let x = sz.width / 2 + CGFloat(i % 2 == 0 ? 1 : -1) * (28 + CGFloat(i) * 7) * size
+                let y = sz.height / 2 + CGFloat(i % 3 == 0 ? -1 : 1) * (5 + CGFloat(i % 3) * 3) * size
+                // 兩層同心圓代替 blur 光暈
+                let halo: [(CGFloat, Double)] = [(3.0, 0.13), (1.9, 0.26)]
+                for (k, a) in halo {
+                    let rr = r * k
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - rr / 2, y: y - rr / 2,
+                                                    width: rr, height: rr)),
+                             with: .color(title.glow.opacity(a)))
+                }
+                ctx.fill(Path(ellipseIn: CGRect(x: x - r / 2, y: y - r / 2,
+                                                width: r, height: r)),
+                         with: .color(.white.opacity(0.78)))
             }
         }
         .rotationEffect(.degrees(angle))

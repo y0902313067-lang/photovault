@@ -571,7 +571,7 @@ struct ProfilePageView: View {
     @State private var other: PublicUser?
     @State private var loading = true
     @State private var guestProfile = ""
-    private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    private let ticker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private var isMe: Bool { profileID == nil }
 
@@ -801,7 +801,8 @@ struct ProfilePageView: View {
     }
 
     private var feedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // v44：動態改用 LazyVStack，滑到哪才長哪一張，不會一進頁面就把全部卡片連圖帶光暈一次算完
+        LazyVStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("動態")
                     .font(.system(size: 10.5, weight: .bold))
