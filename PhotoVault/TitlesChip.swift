@@ -40,14 +40,14 @@ struct TitleChip: View {
     // 光暈是圖裡自帶的，這裡只補一層會呼吸的外發光。
 
     /// 名牌型稱號的顯示高度
-    /// 這幾款的字是畫在圖裡的，佔圖高約 16%，所以要比一般膠囊大一點才看得清；
+    /// 這幾款的字是畫在圖裡的，佔圖高約 20%，所以要比一般膠囊大一點才看得清；
     /// 太小的地方（動態卡片）就讓它維持在 30 上下，不去硬撐版面。
-    private var bannerH: CGFloat { max(30, 54 * size) }
+    private var bannerH: CGFloat { max(30, 56 * size) }
 
     @ViewBuilder
     private func bannerBody(_ name: String) -> some View {
         if live {
-            TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 24)) { ctx in
                 bannerImage(name, t: ctx.date.timeIntervalSince1970)
             }
             .fixedSize()
@@ -59,15 +59,69 @@ struct TitleChip: View {
         }
     }
 
+    // MARK: 名牌動效（v43）
+    //
+    // 上一版只有 1% 縮放 + 極輕的陰影變化，肉眼等於不動；而且素材 PNG 裡帶著
+    // 一整塊深紫底（含三圈鋪滿畫面的光暈），貼在稱號格上就是一張貼紙。
+    // 現在素材只留牌體（真透明），這裡改成四層真的會動的東西：
+    //   ① 牌後柔光：徑向光暈隨呼吸明暗，牌子像是自己發光，不是貼上去
+    //   ② 流光：一道斜向亮帶週期性掃過，只用牌形做遮罩，光不會跑到牌外
+    //   ③ 描邊發光：外圈陰影兩層一起呼吸，邊緣會亮起來
+    //   ④ 微浮動：上下 1pt 擺動 + 0.8% 縮放，靜止畫面也有生命感
+
     private func bannerImage(_ name: String, t: Double) -> some View {
-        let breathe = t == 0 ? 0.5 : (sin(t * 1.5) + 1) / 2
+        let breathe = t == 0 ? 0.5 : (sin(t * 1.55) + 1) / 2
+        let floatY = t == 0 ? 0 : CGFloat(sin(t * 1.05)) * (0.9 * size)
+        let sweep = CGFloat((t * 0.34).truncatingRemainder(dividingBy: 1))
+
         return Image(name)
             .resizable()
             .interpolation(.high)
             .scaledToFit()
             .frame(height: bannerH)
-            .shadow(color: title.glow.opacity(0.20 + 0.30 * breathe), radius: 5 + 5 * breathe)
-            .scaleEffect(1 + 0.012 * breathe)
+            .background {
+                // ① 牌後柔光：橢圓徑向，範圍只到牌外一圈，不會形成方塊
+                RadialGradient(colors: [title.glow.opacity(0.34 + 0.26 * breathe),
+                                        title.glow.opacity(0.0)],
+                               center: .center,
+                               startRadius: 0,
+                               endRadius: bannerH * 1.35)
+                    .scaleEffect(x: 0.92, y: 0.82)
+                    .blur(radius: bannerH * 0.10)
+                    .opacity(t == 0 ? 0.55 : 1)
+            }
+            .overlay {
+                // ② 流光掃過（t == 0 時不畫，避免靜態場合多一層）
+                if t != 0 {
+                    GeometryReader { geo in
+                        let w = geo.size.width
+                        LinearGradient(
+                            stops: [.init(color: .white.opacity(0.0), location: 0.00),
+                                    .init(color: .white.opacity(0.30), location: 0.38),
+                                    .init(color: .white.opacity(0.78), location: 0.50),
+                                    .init(color: .white.opacity(0.30), location: 0.62),
+                                    .init(color: .white.opacity(0.0), location: 1.00)],
+                            startPoint: .leading, endPoint: .trailing)
+                        .frame(width: w * 0.44)
+                        .rotationEffect(.degrees(-18))
+                        .offset(x: -w * 0.55 + sweep * (w * 1.70))
+                        .blendMode(.plusLighter)
+                    }
+                    .allowsHitTesting(false)
+                    .mask {
+                        Image(name)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                    }
+                }
+            }
+            .shadow(color: title.glow.opacity(0.24 + 0.52 * breathe),
+                    radius: 3 + 9 * breathe, y: 0.5)
+            .shadow(color: title.glow.opacity(0.10 + 0.30 * breathe),
+                    radius: 9 + 17 * breathe)
+            .scaleEffect(1 + 0.008 * breathe)
+            .offset(y: floatY)
     }
 
     private var capsuleBody: some View {
