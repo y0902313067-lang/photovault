@@ -42,7 +42,6 @@ final class DriveAlertEngine: ObservableObject {
     // 對外顯示
     @Published private(set) var limit: Int?
     @Published private(set) var limitFromInterval = false
-    @Published private(set) var limitEstimated = false
     @Published private(set) var cameraAlert: CameraAlert?
     @Published private(set) var intervalApproach: IntervalApproach?
     @Published private(set) var intervalLive: IntervalLive?
@@ -52,13 +51,6 @@ final class DriveAlertEngine: ObservableObject {
     @Published private(set) var intervalCount = 0
     @Published var voiceOn: Bool = DriveVoice.shared.enabled {
         didSet { DriveVoice.shared.enabled = voiceOn }
-    }
-    /// 沒有實測速限的路段，是否用同級道路鄰近路段推定（預設開）
-    @Published var estimateOn: Bool = UserDefaults.standard.object(forKey: "driveEstimateOn") as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(estimateOn, forKey: "driveEstimateOn")
-            candidateAt = Date.distantPast
-        }
     }
 
     private let data = DriveData.shared
@@ -84,7 +76,6 @@ final class DriveAlertEngine: ObservableObject {
     private var firedIv: [Int: Date] = [:]
     private var candidateLimit: Int?
     private var candidateAt: Date?
-    private var candidateEst = false
     private var saidLimit: Int?
     private var lastLimitAt = Date.distantPast
     private var overAt = Date.distantPast
@@ -170,25 +161,21 @@ final class DriveAlertEngine: ObservableObject {
     private func refreshLimit(lat: Double, lon: Double, now: Date) {
         // 區間路段自帶速限，優先且立即採用
         if let r = run {
-            applyLimit(r.zone.limit, fromInterval: true, estimated: false, now: now)
+            applyLimit(r.zone.limit, fromInterval: true, now: now)
             candidateLimit = r.zone.limit
-            candidateEst = false
             candidateAt = now
             return
         }
 
-        let hit = data.limitHit(lat, lon, speedKmh: speedKmh)
-        var found = hit?.speed
-        var est = hit?.estimated ?? false
-        if est, !estimateOn { found = nil; est = false }
-        if found != candidateLimit || est != candidateEst {
+        // 圖資沒收錄就是 nil，不做任何推定
+        let found = data.limitHit(lat, lon, speedKmh: speedKmh)
+        if found != candidateLimit {
             candidateLimit = found
-            candidateEst = est
             candidateAt = now
             if found == nil {
                 // 剛好在路口、或是路段接縫：先不要立刻把數字抹掉，留幾秒免得閃
                 if limit == nil || now.timeIntervalSince(lastLimitAt) > 6 {
-                    applyLimit(nil, fromInterval: false, estimated: false, now: now)
+                    applyLimit(nil, fromInterval: false, now: now)
                 }
             }
             return
@@ -196,14 +183,13 @@ final class DriveAlertEngine: ObservableObject {
         guard let f = found, let at = candidateAt else { return }
         // 連續 1.2 秒都在同一速限才確認，避免路口跳動
         if now.timeIntervalSince(at) > 1.2 {
-            applyLimit(f, fromInterval: false, estimated: est, now: now)
+            applyLimit(f, fromInterval: false, now: now)
         }
     }
 
-    private func applyLimit(_ v: Int?, fromInterval: Bool, estimated: Bool = false, now: Date) {
+    private func applyLimit(_ v: Int?, fromInterval: Bool, now: Date) {
         if limit != v { limit = v }
         if limitFromInterval != fromInterval { limitFromInterval = fromInterval }
-        if limitEstimated != estimated { limitEstimated = estimated }
 
         let over = (v != nil) && speedKmh > Double(v!) + 9 && speedKmh > 12
         if overSpeed != over { overSpeed = over }

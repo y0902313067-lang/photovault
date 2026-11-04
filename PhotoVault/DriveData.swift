@@ -230,27 +230,17 @@ final class DriveData {
 
     // MARK: 查詢
 
-    struct LimitHit {
-        let speed: Int
-        let estimated: Bool     // true = 由鄰近同級道路推定，非該路段實測標籤
-    }
-
     /// 精確命中判定：車子離路段這麼近，才算真的走在這條路上
     private static let EXACT_DIST = 26.0
     /// 高架／平面重疊時，兩層距離差在這以內才算「腳下兩條路」
     private static let OVERLAP_SLACK = 25.0
-    /// 推定時最多往外找多遠（公尺）
-    private static let EST_RADIUS = 260.0
-    /// 推定參與投票的鄰近路段數
-    private static let EST_NEIGHBORS = 10
-    /// 推定至少要幾條同級路段才敢說話
-    private static let EST_MIN_SAMPLES = 3
 
     /// 該座標的路段速限；查不到回 nil
-    func limitAt(_ lat: Double, _ lon: Double) -> Int? { limitHit(lat, lon)?.speed }
+    func limitAt(_ lat: Double, _ lon: Double) -> Int? { limitHit(lat, lon) }
 
+    /// 只回報該座標路段「確實收錄」的速限，查不到就是 nil——不做任何推定
     /// - Parameter speedKmh: 當前車速，用於高架／平面重疊時判斷走哪一層
-    func limitHit(_ lat: Double, _ lon: Double, speedKmh: Double = 0) -> LimitHit? {
+    func limitHit(_ lat: Double, _ lon: Double, speedKmh: Double = 0) -> Int? {
         if tiles.isEmpty { return nil }
         let ti = Int(floor(lat / DriveData.TILE))
         let tj = Int(floor(lon / DriveData.TILE))
@@ -263,8 +253,6 @@ final class DriveData {
         var highLimit: Int?
         var highLevel = 0
         var highDist = Double.greatestFiniteMagnitude
-        var near: [(d: Double, s: Int, lv: Int)] = []
-        near.reserveCapacity(DriveData.EST_NEIGHBORS)
 
         for di in -1...1 {
             for dj in -1...1 {
@@ -290,62 +278,22 @@ final class DriveData {
                         highLimit = seg.limit
                         highLevel = seg.level
                     }
-                    if d < DriveData.EST_RADIUS {
-                        pushNear(&near, d, seg.limit, seg.level)
-                    }
                 }
             }
         }
 
-        // ① 腳下確實有速限資料
-        if let b = bestLimit, bestDist <= DriveData.EXACT_DIST {
-            // 高架／平面上下重疊：車速快就當作走上面那層
-            if let h = highLimit, highLevel > bestLevel,
-               highDist <= max(DriveData.EXACT_DIST, bestDist + DriveData.OVERLAP_SLACK),
-               speedKmh >= 70 {
-                return LimitHit(speed: h, estimated: false)
-            }
-            // 明明是平面路段，但旁邊 25 公尺內的高速速限被拉進來 → 不採用
-            return LimitHit(speed: b, estimated: false)
+        // 只採用腳下這段路「確實收錄」的速限
+        guard let b = bestLimit, bestDist <= DriveData.EXACT_DIST else {
+            // 查不到就回 nil：畫面不顯示數字，語音也不會報——絕不推測
+            return nil
         }
-
-        // ② 沒有實測 → 用同一條路 / 同級道路的鄰近路段推定
-        let refLevel = bestLevel
-        // 低速行駛卻只找得到快速道路／高架（level ≥ 8）：很可能實際走在平面道路，不硬套
-        if refLevel >= 8, speedKmh <= 65 { return nil }
-        let same = near.filter { abs($0.lv - refLevel) <= 1 }
-        guard same.count >= DriveData.EST_MIN_SAMPLES else { return nil }
-        var weight: [Int: Double] = [:]
-        for c in same {
-            weight[c.s, default: 0] += 1.0 / (1.0 + c.d / 40.0)
+        // 高架／平面上下重疊：車速快就當作走上面那層
+        if let h = highLimit, highLevel > bestLevel,
+           highDist <= max(DriveData.EXACT_DIST, bestDist + DriveData.OVERLAP_SLACK),
+           speedKmh >= 70 {
+            return h
         }
-        guard let top = weight.max(by: { $0.value < $1.value }) else { return nil }
-        // 等級對不上就寧可不說：小路上推不出 70、平面道路上推不出 110
-        guard top.key <= levelCap(refLevel) else { return nil }
-        return LimitHit(speed: top.key, estimated: true)
-    }
-
-    /// 這條等級的路，速限最多可能到多少（超過就是不合理的推定）
-    private func levelCap(_ level: Int) -> Int {
-        switch level {
-        case ...2: return 50
-        case 3...5: return 60
-        case 6: return 70
-        case 7: return 80
-        case 8, 9: return 90
-        case 10...13: return 110
-        default: return 60
-        }
-    }
-
-    /// 維護「最近的 N 條路段」
-    private func pushNear(_ arr: inout [(d: Double, s: Int, lv: Int)], _ d: Double, _ s: Int, _ lv: Int) {
-        if arr.count < DriveData.EST_NEIGHBORS {
-            arr.append((d, s, lv))
-            if arr.count == DriveData.EST_NEIGHBORS { arr.sort { $0.d < $1.d } }
-        } else if let last = arr.last, d < last.d {
-            arr[DriveData.EST_NEIGHBORS - 1] = (d, s, lv)
-            arr.sort { $0.d < $1.d }
-        }
+        // 明明是平面路段，但旁邊 25 公尺內的高速速限被拉進來 → 不採用
+        return b
     }
 }
