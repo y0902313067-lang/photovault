@@ -56,6 +56,7 @@ struct ChatRoomView: View {
                                             myLevel: store.level,
                                             myProfileID: store.profileID ?? "",
                                             myAvatar: store.avatarImage,
+                                            myFrame: store.myFrame,
                                             onGuest: { pid in
                                                 if !pid.isEmpty { guest = pid }
                                             },
@@ -417,6 +418,7 @@ private struct ChatRow: View, Equatable {
     let myLevel: MemberLevel
     let myProfileID: String
     let myAvatar: UIImage?
+    let myFrame: String?
     let onGuest: (String) -> Void
     let onReply: (ChatMessage) -> Void
 
@@ -426,6 +428,7 @@ private struct ChatRow: View, Equatable {
             && a.myLevel == b.myLevel
             && a.myProfileID == b.myProfileID
             && a.myAvatar === b.myAvatar
+            && a.myFrame == b.myFrame
     }
 
     var body: some View {
@@ -434,7 +437,8 @@ private struct ChatRow: View, Equatable {
 
             if !mine {
                 Button { onGuest(m.profileID) } label: {
-                    AvatarBubble(profileID: m.profileID, file: m.avatar, size: 38, ring: m.level)
+                    AvatarBubble(profileID: m.profileID, file: m.avatar, size: 38, ring: m.level,
+                                 frame: Frames.equipped(in: m.titles)?.storeKey)
                 }
                 .buttonStyle(.plain)
             }
@@ -491,7 +495,8 @@ private struct ChatRow: View, Equatable {
 
             if mine {
                 AvatarBubble(profileID: myProfileID, file: nil,
-                             size: 38, ring: myLevel, localImage: myAvatar)
+                             size: 38, ring: myLevel, localImage: myAvatar,
+                             frame: myFrame)
             }
 
             if !mine { Spacer(minLength: 40) }

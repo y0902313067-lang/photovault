@@ -93,6 +93,9 @@ final class AppStore: ObservableObject {
     @Published var level: MemberLevel = LaunchPhase.defaultLevel
     @Published var myTitles: [String] = []
     @Published var pendingGrants: [PendingGrant] = []
+
+    /// 自己現在戴著的頭框（"frame.flame"），沒有就是 nil
+    var myFrame: String? { Frames.equipped(in: myTitles)?.storeKey }
     @Published var rewardToast: String?          // 領到新東西時的彈窗內容
     @Published var taskBadge: Bool = false       // 工具箱上的任務紅點
 
@@ -188,11 +191,14 @@ final class AppStore: ObservableObject {
 
         var finalLevel = lv
         var newKeys: [String] = []
+        var newFrames: [String] = []
 
-        // 後台贈與：等級 / 稱號
+        // 後台贈與：等級 / 稱號 / 頭框
         for g in grants {
             if g.kind == "title", let def = Titles.find(g.value) {
                 if !titles.contains(def.key) { newKeys.append(def.key) }
+            } else if g.kind == "frame", let def = Frames.find(g.value) {
+                if !titles.contains(def.storeKey) { newFrames.append(def.storeKey) }
             } else if g.kind == "level", let n = Int(g.value), let target = MemberLevel(rawValue: n) {
                 finalLevel = target
             }
@@ -203,8 +209,11 @@ final class AppStore: ObservableObject {
             await SocialAPI.setLevel(userID: uid, level: finalLevel, token: token)
         }
 
-        // 後台贈與的稱號要真的寫進資料庫，不然下次就沒了
+        // 後台贈與的稱號／頭框要真的寫進資料庫，不然下次就沒了
         for k in newKeys {
+            await SocialAPI.grantTitle(userID: uid, key: k, source: "admin", token: token)
+        }
+        for k in newFrames {
             await SocialAPI.grantTitle(userID: uid, key: k, source: "admin", token: token)
         }
 
@@ -212,11 +221,14 @@ final class AppStore: ObservableObject {
             level = finalLevel
             var list = titles
             for k in newKeys where !list.contains(k) { list.append(k) }
+            for k in newFrames where !list.contains(k) { list.append(k) }
             myTitles = Titles.resolved(list, level: finalLevel)
             pendingGrants = []
             if let first = newKeys.first, let def = Titles.find(first) {
                 rewardToast = first
                 _ = def
+            } else if let firstFrame = newFrames.first, let def = Frames.find(firstFrame) {
+                rewardToast = "frame:" + def.key
             } else if grants.contains(where: { $0.kind == "level" }) {
                 rewardToast = "level:\(finalLevel.rawValue)"
             }
@@ -284,6 +296,11 @@ final class AppStore: ObservableObject {
                 await MainActor.run {
                     if !myTitles.contains(def.key) { myTitles.append(def.key) }
                     rewardToast = def.key
+                }
+            } else if g.kind == "frame", let def = Frames.find(g.value) {
+                await MainActor.run {
+                    if !myTitles.contains(def.storeKey) { myTitles.append(def.storeKey) }
+                    rewardToast = "frame:" + def.key
                 }
             } else if g.kind == "level", let n = Int(g.value), let lv = MemberLevel(rawValue: n) {
                 await MainActor.run {

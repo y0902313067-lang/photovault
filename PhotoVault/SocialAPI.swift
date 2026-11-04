@@ -286,6 +286,8 @@ enum SocialAPI {
         // 立刻生效
         if kind == "title" {
             await grantTitle(userID: userID, key: value, source: "redeem", token: token)
+        } else if kind == "frame" {
+            await grantTitle(userID: userID, key: Frames.storeKey(value), source: "redeem", token: token)
         } else if kind == "level", let n = Int(value), let lv = MemberLevel(rawValue: n) {
             await setLevel(userID: userID, level: lv, token: token)
         }

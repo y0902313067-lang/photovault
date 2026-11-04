@@ -78,6 +78,9 @@ struct RootView: View {
             RewardPopup(title: nil, level: lv) { store.rewardToast = nil }
         } else if let def = Titles.find(reward) {
             RewardPopup(title: def, level: nil) { store.rewardToast = nil }
+        } else if reward.hasPrefix("frame:"),
+                  let def = Frames.find(String(reward.dropFirst(6))) {
+            RewardPopup(title: nil, level: nil, frame: def) { store.rewardToast = nil }
         }
     }
 

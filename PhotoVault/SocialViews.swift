@@ -313,6 +313,7 @@ struct LevelInfoView: View {
 struct RewardPopup: View {
     let title: TitleDef?
     let level: MemberLevel?
+    var frame: FrameDef? = nil
     var onClose: () -> Void
 
     @State private var appear = false
@@ -332,6 +333,19 @@ struct RewardPopup: View {
                     TitleChip(title: title, size: 1.7)
                         .padding(.vertical, 10)
                     Text(title.name)
+                        .font(.system(size: 19, weight: .bold))
+                        .foregroundStyle(.white)
+                } else if let frame {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [Color(red: 0.16, green: 0.22, blue: 0.32),
+                                                          Color(red: 0.09, green: 0.12, blue: 0.18)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 96, height: 96)
+                        AvatarFrameLayer(raw: frame.storeKey, avatar: 96)
+                    }
+                    .padding(.vertical, 6)
+                    Text(frame.name)
                         .font(.system(size: 19, weight: .bold))
                         .foregroundStyle(.white)
                 } else if let level {

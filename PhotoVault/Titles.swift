@@ -11,6 +11,8 @@ struct TitleDef: Identifiable, Hashable {
     let glow: Color
     let tier: Int          // 0 = 樸素, 1 = 一層金光, 2 = 雙層輝光, 3 = 最強輝光
     let how: String        // 取得方式
+    /// 有值 = 整條名牌圖（文字、雕件、光暈都畫在圖裡），不吃膠囊樣式
+    var banner: String? = nil
 
     var id: String { key }
 
@@ -231,7 +233,58 @@ enum Titles {
                  edge: Color(red: 0.80, green: 0.90, blue: 1.0),
                  glow: Color(red: 0.55, green: 0.75, blue: 1.0),
                  tier: 1,
-                 how: "僅由官方後台授予")
+                 how: "僅由官方後台授予"),
+
+        // MARK: 榮耀系列（限量名牌，只能由後台贈送或兌換碼，不掛任務）
+        TitleDef(key: "guard", name: "榮耀守護神", image: "ttGuard",
+                 colors: [Color(red: 0.05, green: 0.11, blue: 0.26),
+                          Color(red: 0.13, green: 0.33, blue: 0.66),
+                          Color(red: 0.42, green: 0.68, blue: 1.0)],
+                 edge: Color(red: 0.72, green: 0.88, blue: 1.0),
+                 glow: Color(red: 0.35, green: 0.66, blue: 1.0),
+                 tier: 7,
+                 how: "官方限量贈送，不掛任務",
+                 banner: "ttGuard"),
+
+        TitleDef(key: "lord", name: "榮耀主宰", image: "ttLord",
+                 colors: [Color(red: 0.20, green: 0.03, blue: 0.05),
+                          Color(red: 0.52, green: 0.08, blue: 0.10),
+                          Color(red: 0.86, green: 0.28, blue: 0.22)],
+                 edge: Color(red: 1.0, green: 0.76, blue: 0.62),
+                 glow: Color(red: 1.0, green: 0.36, blue: 0.24),
+                 tier: 7,
+                 how: "官方限量贈送，不掛任務",
+                 banner: "ttLord"),
+
+        TitleDef(key: "fate", name: "命中注定", image: "ttFate",
+                 colors: [Color(red: 0.20, green: 0.05, blue: 0.22),
+                          Color(red: 0.48, green: 0.16, blue: 0.52),
+                          Color(red: 0.88, green: 0.49, blue: 1.0)],
+                 edge: Color(red: 1.0, green: 0.80, blue: 1.0),
+                 glow: Color(red: 0.88, green: 0.48, blue: 1.0),
+                 tier: 7,
+                 how: "官方限量贈送，不掛任務",
+                 banner: "ttFate"),
+
+        TitleDef(key: "sage", name: "仙神降世", image: "ttSage",
+                 colors: [Color(red: 0.03, green: 0.16, blue: 0.19),
+                          Color(red: 0.09, green: 0.42, blue: 0.48),
+                          Color(red: 0.49, green: 0.85, blue: 0.92)],
+                 edge: Color(red: 0.78, green: 0.96, blue: 1.0),
+                 glow: Color(red: 0.49, green: 0.85, blue: 0.92),
+                 tier: 7,
+                 how: "官方限量贈送，不掛任務",
+                 banner: "ttSage"),
+
+        TitleDef(key: "party", name: "派對榮耀王", image: "ttParty",
+                 colors: [Color(red: 0.22, green: 0.05, blue: 0.18),
+                          Color(red: 0.55, green: 0.14, blue: 0.44),
+                          Color(red: 1.0, green: 0.37, blue: 0.69)],
+                 edge: Color(red: 1.0, green: 0.78, blue: 0.92),
+                 glow: Color(red: 1.0, green: 0.37, blue: 0.69),
+                 tier: 7,
+                 how: "官方限量贈送，不掛任務",
+                 banner: "ttParty")
     ]
 
     static let order: [String: Int] = {
@@ -242,9 +295,10 @@ enum Titles {
 
     static func find(_ key: String) -> TitleDef? { all.first { $0.key == key } }
 
-    /// 後台 / 兌換碼可以發的（7 / 8 / 9 ＋ 三階王爵）＋ 管理員
+    /// 後台 / 兌換碼可以發的（7 / 8 / 9 ＋ 三階王爵 ＋ 榮耀系列）＋ 管理員
     static var grantable: [TitleDef] {
-        all.filter { ["dad", "grand", "rich", "duke1", "duke2", "duke3", "admin"].contains($0.key) }
+        all.filter { ["dad", "grand", "rich", "duke1", "duke2", "duke3",
+                      "guard", "lord", "fate", "sage", "party", "admin"].contains($0.key) }
     }
 
     /// 會員等級自動帶的王爵稱號（只往上疊，升星不收回）

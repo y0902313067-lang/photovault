@@ -10,6 +10,11 @@ struct AvatarBubble: View {
     var size: CGFloat = 84
     var ring: MemberLevel? = nil
     var localImage: UIImage? = nil
+    /// 戴著的頭框（"frame.flame"）；戴框時整個元件會比頭像大一圈
+    var frame: String? = nil
+
+    private var framed: Bool { Frames.find(frame ?? "") != nil }
+    private var outer: CGFloat { framed ? size / Frames.avatarRatio : size }
 
     var body: some View {
         ZStack {
@@ -53,8 +58,10 @@ struct AvatarBubble: View {
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
                     lineWidth: size > 60 ? 2 : 1.4)
                 .frame(width: size, height: size)
+
+            AvatarFrameLayer(raw: frame, avatar: size)
         }
-        .frame(width: size, height: size)
+        .frame(width: outer, height: outer)
     }
 
     private var ringStroke: [Color] {
@@ -106,7 +113,8 @@ struct PostCard: View {
                         onAvatarTap?(post.profileID)
                     } label: {
                         AvatarBubble(profileID: post.profileID, file: post.avatar,
-                                     size: 38, ring: post.level)
+                                     size: 38, ring: post.level,
+                                     frame: Frames.equipped(in: post.titles)?.storeKey)
                     }
                     .buttonStyle(.plain)
 
@@ -669,11 +677,18 @@ struct ProfilePageView: View {
                                                startPoint: .topLeading, endPoint: .bottomTrailing),
                                 lineWidth: 2)
                             .frame(width: 96, height: 96)
+
+                        AvatarFrameLayer(raw: store.myFrame, avatar: 96)
                     }
-                    .frame(width: 96, height: 96)
+                    .frame(width: Frames.find(store.myFrame ?? "") == nil
+                           ? 96 : 96 / Frames.avatarRatio,
+                           height: Frames.find(store.myFrame ?? "") == nil
+                           ? 96 : 96 / Frames.avatarRatio)
                 } else {
                     AvatarBubble(profileID: pid, file: isMe ? nil : other?.avatar,
-                                 size: 96, ring: shownLevel)
+                                 size: 96, ring: shownLevel,
+                                 frame: isMe ? store.myFrame
+                                             : Frames.equipped(in: other?.titles ?? [])?.storeKey)
                 }
             }
             .padding(.top, 14)
@@ -723,14 +738,37 @@ struct ProfilePageView: View {
                 }
             }
             TitleFlow(owned: visibleTitles, size: 1.0, spacing: 9)
+
+            if let f = Frames.equipped(in: shownTitles) {
+                HStack(spacing: 7) {
+                    Image(f.image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                    Text(f.name)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                    Text("頭框")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TT.mint.opacity(0.8))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(TT.mint.opacity(0.12)))
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 3)
+            }
         }
         .padding(.horizontal, 2)
     }
 
     private var visibleTitles: [String] {
-        if isMe { return titleLayout.visible(shownTitles) }
+        // 頭框跟稱號共用一張表（frame. 開頭），排版時要濾掉，不然會混進編排清單
+        let titles = shownTitles.filter { !$0.hasPrefix(Frames.prefix) }
+        if isMe { return titleLayout.visible(titles) }
         // 別人的主頁：照對方自己排的順序，並濾掉他選擇不顯示的
-        return TitleLayoutStore.arrange(owned: shownTitles,
+        return TitleLayoutStore.arrange(owned: titles,
                                         order: other?.titleOrder ?? [],
                                         hidden: other?.titleHidden ?? [])
     }

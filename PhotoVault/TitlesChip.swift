@@ -26,6 +26,48 @@ struct TitleChip: View {
     }
 
     var body: some View {
+        if let banner = title.banner {
+            bannerBody(banner)
+        } else {
+            capsuleBody
+        }
+    }
+
+    // MARK: 名牌型（整條圖，文字與雕件都畫在圖裡）
+    //
+    // 這幾款是限量名牌，不是「小圖標 + 文字」的膠囊，
+    // 所以直接照原圖比例擺，長得比一般稱號稍大一點，
+    // 光暈是圖裡自帶的，這裡只補一層會呼吸的外發光。
+
+    private var bannerH: CGFloat { 42 * size }
+
+    @ViewBuilder
+    private func bannerBody(_ name: String) -> some View {
+        if live {
+            TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
+                bannerImage(name, t: ctx.date.timeIntervalSince1970)
+            }
+            .fixedSize()
+            .onAppear { onScreen = true }
+            .onDisappear { onScreen = false }
+        } else {
+            bannerImage(name, t: 0)
+                .fixedSize()
+        }
+    }
+
+    private func bannerImage(_ name: String, t: Double) -> some View {
+        let breathe = t == 0 ? 0.5 : (sin(t * 1.5) + 1) / 2
+        return Image(name)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(height: bannerH)
+            .shadow(color: title.glow.opacity(0.20 + 0.30 * breathe), radius: 5 + 5 * breathe)
+            .scaleEffect(1 + 0.012 * breathe)
+    }
+
+    private var capsuleBody: some View {
         core
             .overlay {
                 if live {
