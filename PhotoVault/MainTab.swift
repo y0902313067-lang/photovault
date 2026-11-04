@@ -1,5 +1,22 @@
 import SwiftUI
 
+// MARK: - 分頁啟用標記
+//
+// 三個分頁是同時存活、用透明度切換的（這樣切回來不會掉狀態）。
+// 但缺點是：看不見的那兩頁仍然在跑動畫、在跑定時刷新。
+// 這裡把「現在是不是我」傳下去，各頁據此決定要不要跑動效與輪詢。
+
+private struct TabActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var tabActive: Bool {
+        get { self[TabActiveKey.self] }
+        set { self[TabActiveKey.self] = newValue }
+    }
+}
+
 // MARK: - 主容器（底部三欄）
 
 struct MainTabView: View {
@@ -10,14 +27,17 @@ struct MainTabView: View {
             HomeView()
                 .opacity(tab == 0 ? 1 : 0)
                 .allowsHitTesting(tab == 0)
+                .environment(\.tabActive, tab == 0)
 
             MoreToolsView()
                 .opacity(tab == 1 ? 1 : 0)
                 .allowsHitTesting(tab == 1)
+                .environment(\.tabActive, tab == 1)
 
             ProfilePageView(embedded: true)
                 .opacity(tab == 2 ? 1 : 0)
                 .allowsHitTesting(tab == 2)
+                .environment(\.tabActive, tab == 2)
 
             MintTabBar(selection: $tab)
         }

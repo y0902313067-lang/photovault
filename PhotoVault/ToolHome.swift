@@ -225,6 +225,8 @@ struct HomeView: View {
     @State private var showChat = false
     @State private var unread = 0
     private let chatTicker = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
+    // v46：這一頁是常駐的，切到別的分頁時不該繼續輪詢未讀數
+    @Environment(\.tabActive) private var tabActive
 
     private let groups: [ToolGroup] = ToolCatalog.homeGroups
 
@@ -294,6 +296,7 @@ struct HomeView: View {
 
     /// 聊天室未讀數（別人發的、比上次進聊天室新的）
     private func pollUnread() async {
+        guard tabActive else { return }
         guard let uid = store.authUserID else { return }
         if showChat {
             await MainActor.run { unread = 0 }

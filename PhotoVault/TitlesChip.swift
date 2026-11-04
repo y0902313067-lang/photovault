@@ -1,5 +1,29 @@
 import SwiftUI
 
+// MARK: - 同屏動效預算
+//
+// 一頁上可能同時掛二十幾個稱號。若每個都各開一條時間軸，
+// 等於每秒上百次重繪，滾動一定掉幀。
+// 這裡限制「同時最多 6 個在動」，其餘顯示靜態版——肉眼幾乎看不出差別，CPU 差一個量級。
+// 只在主執行緒使用（onAppear / onDisappear 都在主執行緒）。
+
+final class MotionBudget {
+    static let shared = MotionBudget()
+    private var active = 0
+    private let limit = 6
+
+    func take() -> Bool {
+        guard active < limit else { return false }
+        active += 1
+        return true
+    }
+
+    func give() {
+        active = max(0, active - 1)
+    }
+}
+
+
 // MARK: - 稱號膠囊
 //
 // 效能重點（v37）：
@@ -15,14 +39,17 @@ struct TitleChip: View {
     var animated: Bool = true
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tabActive) private var tabActive
     @State private var onScreen = false
+    @State private var hasSlot = false
 
     private var h: CGFloat { 30 * size }
     private var icon: CGFloat { 18.5 * size }
 
     /// 只有真的在畫面上、App 在前景、而且這階有光效時才跑
     private var live: Bool {
-        animated && onScreen && scenePhase == .active && title.tier >= 1
+        animated && onScreen && hasSlot && tabActive
+            && scenePhase == .active && title.tier >= 1
     }
 
     var body: some View {
@@ -33,8 +60,19 @@ struct TitleChip: View {
                 capsuleBody
             }
         }
-        .onAppear { onScreen = true }
-        .onDisappear { onScreen = false }
+        .onAppear {
+            onScreen = true
+            if animated, title.tier >= 1, !hasSlot {
+                hasSlot = MotionBudget.shared.take()
+            }
+        }
+        .onDisappear {
+            onScreen = false
+            if hasSlot {
+                MotionBudget.shared.give()
+                hasSlot = false
+            }
+        }
     }
 
     // MARK: 名牌型（整條圖，文字與雕件都畫在圖裡）
@@ -49,7 +87,7 @@ struct TitleChip: View {
     @ViewBuilder
     private func bannerBody(_ name: String) -> some View {
         if live {
-            TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
                 bannerImage(name, t: ctx.date.timeIntervalSince1970)
             }
             .fixedSize()
@@ -75,28 +113,33 @@ struct TitleChip: View {
 
     private func bannerImage(_ name: String, t: Double) -> some View {
         let breathe = t == 0 ? 0.5 : (sin(t * 1.55) + 1) / 2
-        let floatY = t == 0 ? 0 : CGFloat(sin(t * 1.05)) * (0.9 * size)
         let sweep = CGFloat((t * 0.34).truncatingRemainder(dividingBy: 1))
 
+        // v46：把「貴的層」和「動的層」拆開。
+        // 原本整個牌體每幀改 opacity + offset，兩層大半徑 shadow 就跟著每幀重算，
+        // 一個稱號一秒十次，一頁二十幾個稱號就是幾百次陰影重繪——這才是卡的根源。
+        // 現在牌體與外發光完全不動（SwiftUI 可以快取成位圖），
+        // 只有上面那層「光」在動，而光是漸變、沒有陰影，重繪成本極低。
         return Image(name)
             .resizable()
             .interpolation(.high)
             .scaledToFit()
             .frame(height: bannerH)
+            // ① 靜態牌體 + 外發光：這一層完全不隨時間變，SwiftUI 可以快取，陰影只算一次
+            .shadow(color: title.glow.opacity(0.46), radius: bannerH * 0.26, y: 0.5)
+            .shadow(color: title.glow.opacity(0.20), radius: bannerH * 0.60)
+            // ② 牌後柔光：徑向，只到牌外一圈，不會形成方塊；呼吸只改這層的不透明度
             .background {
-                // ① 牌後柔光：橢圓徑向，範圍只到牌外一圈，不會形成方塊
                 RadialGradient(colors: [title.glow.opacity(0.50),
                                         title.glow.opacity(0.0)],
                                center: .center,
                                startRadius: 0,
                                endRadius: bannerH * 1.35)
                     .scaleEffect(x: 0.92, y: 0.82)
-                    // v44：去掉 blur。徑向漸變本身已經夠軟，
-                    // 這一層大圓角模糊在主頁二十幾個稱號上每幀重算，是滾動卡頓的大頭。
-                    .opacity(t == 0 ? 0.8 : 1)
+                    .opacity(t == 0 ? 0.8 : 0.65 + 0.35 * breathe)
             }
+            // ③ 流光掃過（只有這層真的每幀位移）
             .overlay {
-                // ② 流光掃過（t == 0 時不畫，避免靜態場合多一層）
                 if t != 0 {
                     GeometryReader { geo in
                         let w = geo.size.width
@@ -121,18 +164,13 @@ struct TitleChip: View {
                     }
                 }
             }
-            // 外發光固定參數，不隨每一幀重算陰影；呼吸感改用整體 opacity 帶
-            .shadow(color: title.glow.opacity(0.46), radius: bannerH * 0.26, y: 0.5)
-            .shadow(color: title.glow.opacity(0.20), radius: bannerH * 0.60)
-            .opacity(t == 0 ? 1 : 0.93 + 0.07 * breathe)
-            .offset(y: floatY)
     }
 
     private var capsuleBody: some View {
         core
             .overlay {
                 if live {
-                    TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
                         insideEffects(t: ctx.date.timeIntervalSince1970)
                     }
                     .allowsHitTesting(false)
@@ -141,7 +179,7 @@ struct TitleChip: View {
             .clipShape(Capsule())
             .overlay {
                 if live, title.tier >= 6 {
-                    TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
                         shardEffects(t: ctx.date.timeIntervalSince1970)
                     }
                     .padding(-10 * size)

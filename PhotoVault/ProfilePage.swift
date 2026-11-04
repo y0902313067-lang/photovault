@@ -573,6 +573,8 @@ struct ProfilePageView: View {
     // v44：原本 60 秒一次。刷新本身有網路往返，加上主頁重算，滑動時很容易撞上。
     // 會員等級／稱號這種資料本來就不會秒級變動，拉長到 5 分鐘，進頁面時另外還會刷一次。
     private let ticker = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
+    // v46：這一頁是常駐的（切分頁只是改透明度），所以看不見時也要停手。
+    @Environment(\.tabActive) private var tabActive
 
     private var isMe: Bool { profileID == nil }
 
@@ -644,11 +646,14 @@ struct ProfilePageView: View {
             .sheet(isPresented: $showTitleEditor) {
                 TitleLayoutEditor(owned: shownTitles, layout: titleLayout)
             }
-            .task { await reload() }
+            .task(id: tabActive) {
+                // 只有這一頁真的顯示時才去拉資料，避免三頁同時開機搶頻寬
+                if tabActive { await reload() }
+            }
             .onChange(of: titleLayout.order) { _ in scheduleLayoutPush() }
             .onChange(of: titleLayout.hidden) { _ in scheduleLayoutPush() }
             .onReceive(ticker) { _ in
-                guard isMe else { return }
+                guard isMe, tabActive else { return }
                 Task { await store.refreshSocial() }
             }
         }

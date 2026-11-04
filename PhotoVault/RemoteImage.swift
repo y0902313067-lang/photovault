@@ -56,10 +56,18 @@ final class PVImageCache {
     }
 
     /// 已有快取就立刻回，沒有才下載（同一張只下載一次）
+    ///
+    /// v46：解碼搬到背景執行緒。
+    /// 這裡原本在 await 之後直接解，呼叫端是 SwiftUI 的 .task（繼承主執行緒），
+    /// 所以 ImageIO 的縮圖解碼其實全卡在主執行緒上。一張 3000×4000 的圖
+    /// 幾十毫秒，列表一次進來六張就是幾百毫秒的主執行緒佔用——整台機器都會頓。
     func load(_ url: URL, maxPixel: CGFloat? = nil) async -> UIImage? {
         if let c = cached(url, maxPixel: maxPixel) { return c }
         guard let (data, _) = try? await session.data(from: url) else { return nil }
-        let img = Self.decode(data, maxPixel: maxPixel)
+        let px = maxPixel
+        let img = await Task.detached(priority: .utility) {
+            Self.decode(data, maxPixel: px)
+        }.value
         if let img { store(img, for: url, maxPixel: maxPixel) }
         return img
     }
