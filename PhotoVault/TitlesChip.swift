@@ -120,6 +120,9 @@ struct TitleChip: View {
                     radius: 3 + 9 * breathe, y: 0.5)
             .shadow(color: title.glow.opacity(0.10 + 0.30 * breathe),
                     radius: 9 + 17 * breathe)
+            .saturation(1.05)
+            .brightness(0.03)
+            .contrast(1.04)
             .scaleEffect(1 + 0.008 * breathe)
             .offset(y: floatY)
     }
