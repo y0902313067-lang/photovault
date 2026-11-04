@@ -39,7 +39,10 @@ struct TitleChip: View {
     // 所以直接照原圖比例擺，長得比一般稱號稍大一點，
     // 光暈是圖裡自帶的，這裡只補一層會呼吸的外發光。
 
-    private var bannerH: CGFloat { 42 * size }
+    /// 名牌型稱號的顯示高度
+    /// 這幾款的字是畫在圖裡的，佔圖高約 16%，所以要比一般膠囊大一點才看得清；
+    /// 太小的地方（動態卡片）就讓它維持在 30 上下，不去硬撐版面。
+    private var bannerH: CGFloat { max(30, 54 * size) }
 
     @ViewBuilder
     private func bannerBody(_ name: String) -> some View {
