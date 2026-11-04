@@ -49,7 +49,7 @@ struct TitleChip: View {
     @ViewBuilder
     private func bannerBody(_ name: String) -> some View {
         if live {
-            TimelineView(.animation(minimumInterval: 1.0 / 12)) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
                 bannerImage(name, t: ctx.date.timeIntervalSince1970)
             }
             .fixedSize()
@@ -91,7 +91,8 @@ struct TitleChip: View {
                                startRadius: 0,
                                endRadius: bannerH * 1.35)
                     .scaleEffect(x: 0.92, y: 0.82)
-                    .blur(radius: bannerH * 0.10)
+                    // v44：去掉 blur。徑向漸變本身已經夠軟，
+                    // 這一層大圓角模糊在主頁二十幾個稱號上每幀重算，是滾動卡頓的大頭。
                     .opacity(t == 0 ? 0.8 : 1)
             }
             .overlay {
@@ -131,7 +132,7 @@ struct TitleChip: View {
         core
             .overlay {
                 if live {
-                    TimelineView(.animation(minimumInterval: 1.0 / 12)) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
                         insideEffects(t: ctx.date.timeIntervalSince1970)
                     }
                     .allowsHitTesting(false)
@@ -140,7 +141,7 @@ struct TitleChip: View {
             .clipShape(Capsule())
             .overlay {
                 if live, title.tier >= 6 {
-                    TimelineView(.animation(minimumInterval: 1.0 / 12)) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
                         shardEffects(t: ctx.date.timeIntervalSince1970)
                     }
                     .padding(-10 * size)

@@ -416,17 +416,16 @@ struct PostImages: View {
             Button {
                 viewerIndex = index
             } label: {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        ZStack {
-                            Color.white.opacity(0.05)
-                            ProgressView().tint(.white.opacity(0.4))
-                        }
-                    }
-                }
+                // v44：改走記憶體快取 + 降採樣解碼。
+                // 原本是 AsyncImage，滑動時每個格子重建就重新下載、重新解整張原圖，
+                // 動態一多就是主頁卡頓最大的一筆。這裡按格子實際像素解成小圖。
+                CachedImage(url: url, maxPixel: 420,
+                            placeholder: AnyView(
+                                ZStack {
+                                    Color.white.opacity(0.05)
+                                    ProgressView().tint(.white.opacity(0.4))
+                                }
+                            ))
                 .aspectRatio(1, contentMode: .fill)
                 .frame(maxWidth: .infinity)
                 .clipped()
@@ -571,7 +570,9 @@ struct ProfilePageView: View {
     @State private var other: PublicUser?
     @State private var loading = true
     @State private var guestProfile = ""
-    private let ticker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    // v44：原本 60 秒一次。刷新本身有網路往返，加上主頁重算，滑動時很容易撞上。
+    // 會員等級／稱號這種資料本來就不會秒級變動，拉長到 5 分鐘，進頁面時另外還會刷一次。
+    private let ticker = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     private var isMe: Bool { profileID == nil }
 

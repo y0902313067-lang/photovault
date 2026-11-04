@@ -185,9 +185,12 @@ final class AppStore: ObservableObject {
     /// 拉一次會員等級、稱號、待領取贈與。進主頁時調用即可。
     func refreshSocial() async {
         guard let uid = userID, let token = userToken else { return }
-        let lv = await SocialAPI.ensureMembership(userID: uid, token: token)
-        let titles = await SocialAPI.loadTitles(userID: uid, token: token)
-        let grants = await SocialAPI.loadGrants(userID: uid, token: token)
+        // v44：三個請求並行。原本是排隊等，一次刷新要等三個往返，
+        // 主頁每分鐘準時頓一下就是這來的。
+        async let lvTask = SocialAPI.ensureMembership(userID: uid, token: token)
+        async let titlesTask = SocialAPI.loadTitles(userID: uid, token: token)
+        async let grantsTask = SocialAPI.loadGrants(userID: uid, token: token)
+        let (lv, titles, grants) = await (lvTask, titlesTask, grantsTask)
 
         var finalLevel = lv
         var newKeys: [String] = []
@@ -218,12 +221,16 @@ final class AppStore: ObservableObject {
         }
 
         await MainActor.run {
-            level = finalLevel
+            // v44：內容沒變就不要動 @Published。
+            // 原本每 60 秒無條件 myTitles = …，等同整個主頁（二十幾個稱號 + 全部動態卡片）
+            // 每分鐘被強制重算一次，滑到一半正好撞上就會卡一下。
+            if level != finalLevel { level = finalLevel }
             var list = titles
             for k in newKeys where !list.contains(k) { list.append(k) }
             for k in newFrames where !list.contains(k) { list.append(k) }
-            myTitles = Titles.resolved(list, level: finalLevel)
-            pendingGrants = []
+            let resolvedList = Titles.resolved(list, level: finalLevel)
+            if myTitles != resolvedList { myTitles = resolvedList }
+            if !pendingGrants.isEmpty { pendingGrants = [] }
             if let first = newKeys.first, let def = Titles.find(first) {
                 rewardToast = first
                 _ = def
