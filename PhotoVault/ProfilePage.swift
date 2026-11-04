@@ -89,8 +89,14 @@ struct PostCard: View {
     var onDeleteComment: ((PostComment) -> Void)? = nil
 
     @State private var showComments = false
+    @State private var showAllComments = false
     @State private var draft = ""
     @FocusState private var inputFocused: Bool
+
+    private var shownComments: [PostComment] {
+        if showAllComments || social.comments.count <= 3 { return social.comments }
+        return Array(social.comments.suffix(3))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -253,7 +259,18 @@ struct PostCard: View {
         VStack(alignment: .leading, spacing: 9) {
             if !social.comments.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(social.comments) { c in
+                    if !showAllComments, social.comments.count > 3 {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            withAnimation(.easeInOut(duration: 0.16)) { showAllComments = true }
+                        } label: {
+                            Text("查看全部 \(social.comments.count) 條留言")
+                                .font(.system(size: 11))
+                                .foregroundStyle(TT.mint.opacity(0.9))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(shownComments) { c in
                         commentRow(c)
                     }
                 }
