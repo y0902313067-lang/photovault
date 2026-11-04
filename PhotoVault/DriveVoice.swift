@@ -30,6 +30,8 @@ final class DriveVoice {
     private var generation = 0
     /// 這一輪有沒有拿到可播放的音訊緩衝
     private var hasBuffered = false
+    /// 收齊緩衝後延遲開播的任務
+    private var finishWork: DispatchWorkItem?
 
     private static let enabledKey = "pv_drive_voice_on"
 
@@ -74,8 +76,11 @@ final class DriveVoice {
 
         activateSession()
         stopPlayback()
+        finishWork?.cancel()
+        finishWork = nil
         generation &+= 1
         let gen = generation
+        if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
 
         let u = AVSpeechUtterance(string: text)
         u.voice = Self.preferredVoice()
@@ -87,28 +92,49 @@ final class DriveVoice {
         hasBuffered = false
         synth.write(u) { [weak self] buffer in
             guard let self = self, gen == self.generation else { return }
-            guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else { return }
+            guard let pcm = buffer as? AVAudioPCMBuffer else { return }
+            if pcm.frameLength == 0 {
+                // 合成結束，緩衝已收齊，馬上播
+                self.schedulePlay(gen: gen, after: 0.02)
+                return
+            }
             guard let loud = self.boosted(pcm) else { return }
             self.hasBuffered = true
             self.player.scheduleBuffer(loud, completionHandler: nil)
-            if !self.player.isPlaying { self.player.play() }
+            // 合成器是一塊一塊吐的：太早開播會把後半句（限速 xx 公里）吃掉
+            // 所以每收到一塊就把開播時間往後推，等它安靜下來再播整句
+            self.schedulePlay(gen: gen, after: 0.30)
         }
         // 語音是背景執行緒慢慢吐出來的，等一小段時間還沒有任何緩衝才退回系統播放
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self = self, gen == self.generation, !self.hasBuffered else { return }
             self.synth.speak(u)
         }
     }
 
+    /// 排一個「安靜下來就開播」的任務；每收到一塊緩衝就把時間往後推
+    private func schedulePlay(gen: Int, after: TimeInterval) {
+        finishWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            guard let self = self, gen == self.generation, self.hasBuffered else { return }
+            if !self.player.isPlaying { self.player.play() }
+        }
+        finishWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + after, execute: w)
+    }
+
     func stop() {
         generation &+= 1
+        finishWork?.cancel()
+        finishWork = nil
         stopPlayback()
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
         sessionReady = false
     }
 
     private func stopPlayback() {
-        if player.isPlaying { player.stop() }
+        // 无条件 stop：把上一句已排队的音频一起清掉，否则新一句会把旧句尾巴带出来
+        if playerAttached { player.stop() }
     }
 
     // MARK: 音量放大
@@ -223,15 +249,15 @@ enum DriveSpeech {
         "前方路段限速 \(kmh) 公里"
     }
 
+    /// 測速照相：一律「前方有測速照相，限速 60 公里」
+    /// 距離只放在畫面上，語音不念，講得短、聽得清楚
     static func camera(_ meters: Double, _ kmh: Int) -> String {
-        if meters >= 120 {
-            return "前方 \(dist(meters)) 有測速照相，限速 \(kmh) 公里"
-        }
-        return "測速照相，限速 \(kmh) 公里"
+        kmh > 0 ? "前方有測速照相，限速 \(kmh) 公里"
+                : "前方有測速照相"
     }
 
     static func cameraNear(_ kmh: Int) -> String {
-        "通過測速照相，限速 \(kmh) 公里"
+        kmh > 0 ? "通過測速照相，限速 \(kmh) 公里" : "通過測速照相"
     }
 
     static func intervalStart(_ meters: Double, _ kmh: Int, _ span: Double) -> String {
