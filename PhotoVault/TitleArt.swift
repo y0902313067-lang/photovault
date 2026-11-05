@@ -317,32 +317,38 @@ final class TitleLayerUIView: UIView {
             addStars(t, host: b, maskImg: img)
         }
 
-        // ⑥ 外圈靈氣（王爵以上）—— 兩圈純描邊，靠呼吸明暗做出「靈氣」，
-        //    完全不用模糊，也就沒有離屏渲染。
+        // ⑥ 外圈靈氣（王爵以上）
+        //    v49：這裡原本是兩圈「純描邊」的 CALayer。描邊不管圓角拉多大，
+        //    畫出來都是一條有明確起訖的硬線；牌體本身的外發光是往外漸隱的，
+        //    外面突然套一條硬線，看上去就是「稱號被加了一個框」——很難看。
+        //    現在全部換成徑向柔光貼圖：邊緣 alpha 收到 0，任何寬度、任何
+        //    螢幕密度都不會出現邊界，只剩光在呼吸。而且照樣是貼圖，
+        //    一樣在主執行緒零負擔，不影響 v48 的流暢度。
         if t.tier >= 4 {
-            let ringW = inner.width + pad * 0.9
-            let ringH = inner.height + pad * 0.9
-            let edge = UIColor(t.edge)
+            // 貼著牌體的一圈同色靈氣
+            let aura = CALayer()
+            let aw = inner.width * 1.45
+            let ah = inner.height * 2.6
+            aura.frame = CGRect(x: b.midX - aw / 2, y: b.midY - ah / 2,
+                                width: aw, height: ah)
+            aura.contents = TitleTexture.halo(UIColor(t.edge), alpha: 0.55).cgImage
+            aura.contentsScale = scale
+            aura.opacity = 0.45
+            layer.insertSublayer(aura, below: base)
+            breathe(aura, from: 0.30, to: 0.95, period: 3.1)
 
-            let wide = CALayer()
-            wide.frame = CGRect(x: b.midX - ringW / 2, y: b.midY - ringH / 2,
-                                width: ringW, height: ringH)
-            wide.cornerRadius = ringH / 2
-            wide.borderWidth = 3.0
-            wide.borderColor = edge.withAlphaComponent(0.22).cgColor
-            wide.opacity = 0.5
-            layer.addSublayer(wide)
-            breathe(wide, from: 0.25, to: 1.0, period: 3.1)
-
-            let thin = CALayer()
-            thin.frame = CGRect(x: b.midX - ringW / 2, y: b.midY - ringH / 2,
-                                width: ringW, height: ringH)
-            thin.cornerRadius = ringH / 2
-            thin.borderWidth = 0.9
-            thin.borderColor = edge.withAlphaComponent(0.85).cgColor
-            thin.opacity = 0.7
-            layer.addSublayer(thin)
-            breathe(thin, from: 0.4, to: 1.0, period: 3.1)
+            // 再外擴一層，越高的稱號光暈越大
+            let bloom = CALayer()
+            let grow: CGFloat = t.tier >= 6 ? 2.35 : (t.tier >= 5 ? 2.1 : 1.9)
+            let bw = inner.width * grow
+            let bh = inner.height * (grow * 1.55)
+            bloom.frame = CGRect(x: b.midX - bw / 2, y: b.midY - bh / 2,
+                                 width: bw, height: bh)
+            bloom.contents = TitleTexture.halo(UIColor(t.glow), alpha: 0.45).cgImage
+            bloom.contentsScale = scale
+            bloom.opacity = 0.38
+            layer.insertSublayer(bloom, below: aura)
+            breathe(bloom, from: 0.16, to: 0.62, period: 4.3 + Double(t.tier % 2) * 0.7)
         }
 
         CATransaction.commit()
