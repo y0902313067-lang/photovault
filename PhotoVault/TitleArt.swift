@@ -535,9 +535,12 @@ struct TitleArtChip: View {
             } else if let art {
                 TitleLayerView(title: title, size: size, art: art, animated: animated)
                     .frame(width: m.width + pad * 2, height: m.height + pad * 2)
+                    // 外層只報牌體尺寸：光暈照樣溢出到外面，但不佔排版空間，
+                    // 否則每個稱號之間會多出兩倍的留白，整排會散開。
+                    .frame(width: m.width, height: m.height)
             } else {
                 Color.clear
-                    .frame(width: m.width + pad * 2, height: m.height + pad * 2)
+                    .frame(width: m.width, height: m.height)
             }
         }
         .task(id: title.key) {
