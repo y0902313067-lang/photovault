@@ -41,6 +41,12 @@ struct MainTabView: View {
 
             MintTabBar(selection: $tab)
         }
+        .onAppear {
+            // v48：稱號貼圖在開機後慢慢烤好（分片，不佔主執行緒），
+            // 等使用者切到「我的」時，整排稱號一進去就是完整特效。
+            TitleArtStore.shared.warmDeferred(Titles.all, size: 1.0)
+            TitleArtStore.shared.warmDeferred(Titles.all, size: 1.7)
+        }
     }
 }
 

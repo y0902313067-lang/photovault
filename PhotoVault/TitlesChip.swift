@@ -62,6 +62,9 @@ struct TitleChip: View {
     let title: TitleDef
     var size: CGFloat = 1        // 縮放係數
     var animated: Bool = true
+    /// v48：烤貼圖專用 —— 不掛生命週期、不掛手勢、永遠靜態。
+    /// 烤一次之後主頁顯示的是一張貼圖，特效外用 Core Animation 跑。
+    var baked: Bool = false
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tabActive) private var tabActive
@@ -81,29 +84,36 @@ struct TitleChip: View {
     }
 
     var body: some View {
-        Group {
-            if let banner = title.banner {
-                bannerBody(banner)
-            } else {
-                capsuleBody
-            }
+        if baked {
+            plainContent
+        } else {
+            plainContent
+                .onAppear {
+                    onScreen = true
+                    if animated, title.tier >= 1, !hasSlot {
+                        hasSlot = MotionBudget.shared.take()
+                    }
+                }
+                .onDisappear {
+                    onScreen = false
+                    if hasSlot {
+                        MotionBudget.shared.give()
+                        hasSlot = false
+                    }
+                    poked = false
+                    pokeTask?.cancel()
+                }
+                .onTapGesture { pokeMotion() }
         }
-        .onAppear {
-            onScreen = true
-            if animated, title.tier >= 1, !hasSlot {
-                hasSlot = MotionBudget.shared.take()
-            }
+    }
+
+    @ViewBuilder
+    private var plainContent: some View {
+        if let banner = title.banner {
+            bannerBody(banner)
+        } else {
+            capsuleBody
         }
-        .onDisappear {
-            onScreen = false
-            if hasSlot {
-                MotionBudget.shared.give()
-                hasSlot = false
-            }
-            poked = false
-            pokeTask?.cancel()
-        }
-        .onTapGesture { pokeMotion() }
     }
 
     /// 靜態稱號被點一下 → 讓它自己動 4 秒，之後回到靜止。
@@ -582,10 +592,15 @@ struct TitleFlow: View {
     var body: some View {
         FlowLayout(spacing: spacing, lineSpacing: 10, alignment: .center) {
             ForEach(list) { t in
-                TitleChip(title: t, size: size, animated: animated)
+                // v48：每個稱號顯示的是一張烤好的貼圖，
+                // 特效由 Core Animation 在渲染伺服器上播 —— 主執行緒不參與。
+                TitleArtChip(title: t, size: size, animated: animated)
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
+        .task(id: "flow-\(Int(size * 100))-\(list.count)") {
+            TitleArtStore.shared.warm(list, size: size)
+        }
     }
 }
 

@@ -790,7 +790,7 @@ struct ProfilePageView: View {
                     .buttonStyle(.plain)
                 }
             }
-            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 9, animated: false)
+            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 9, animated: true)
 
             if let f = Frames.equipped(in: shownTitles) {
                 HStack(spacing: 7) {
