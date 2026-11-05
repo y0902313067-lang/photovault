@@ -426,7 +426,7 @@ final class TitleLayerUIView: UIView {
             let cg = TitleTexture.sparkle(spec.color).cgImage
             for _ in 0..<spec.count {
                 let seed = Double((i * 37 + 11) % 97) / 97.0
-                let s = (0.34 + seed * 0.62) * spec.scale
+                let s = CGFloat(0.34 + seed * 0.62) * spec.scale
                 let node = CALayer()
                 node.bounds = CGRect(x: 0, y: 0, width: 32 * s, height: 32 * s)
                 node.contents = cg
@@ -469,13 +469,13 @@ final class TitleLayerUIView: UIView {
 
     private func breathe(_ l: CALayer, from: CGFloat, to: CGFloat, period: Double) {
         let a = CABasicAnimation(keyPath: "opacity")
-        a.fromValue = from
-        a.toValue = to
+        a.fromValue = Float(from)
+        a.toValue = Float(to)
         a.duration = period
         a.autoreverses = true
         a.repeatCount = .infinity
         a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        l.opacity = to
+        l.opacity = Float(to)
         l.add(a, forKey: "breathe")
     }
 
