@@ -24,6 +24,31 @@ final class MotionBudget {
 }
 
 
+// MARK: - 外發光（靜態版只一層）
+//
+// 陰影是離屏渲染。主頁同時掛二十幾個稱號，每一層陰影在滾動時都要重新合成，
+// 這是「主頁滑起來卡」的一大筆帳。靜態稱號只需要「有一圈光」的觀感，
+// 一層窄光就夠；真正在動的那幾個才疊第二層大範圍柔光。
+
+private struct ChipGlowShadow: ViewModifier {
+    let color: Color
+    let strength: Double
+    let radius: CGFloat
+    let wide: Bool
+
+    func body(content: Content) -> some View {
+        if wide {
+            content
+                .shadow(color: color.opacity(strength), radius: radius)
+                .shadow(color: color.opacity(strength * 0.45), radius: radius * 2.1)
+        } else {
+            content
+                .shadow(color: color.opacity(strength * 0.85), radius: radius * 0.85)
+        }
+    }
+}
+
+
 // MARK: - 稱號膠囊
 //
 // 效能重點（v37）：
@@ -42,13 +67,16 @@ struct TitleChip: View {
     @Environment(\.tabActive) private var tabActive
     @State private var onScreen = false
     @State private var hasSlot = false
+    /// v47：靜態模式下，使用者點一下才讓這一個動幾秒
+    @State private var poked = false
+    @State private var pokeTask: Task<Void, Never>?
 
     private var h: CGFloat { 30 * size }
     private var icon: CGFloat { 18.5 * size }
 
     /// 只有真的在畫面上、App 在前景、而且這階有光效時才跑
     private var live: Bool {
-        animated && onScreen && hasSlot && tabActive
+        (animated || poked) && onScreen && hasSlot && tabActive
             && scenePhase == .active && title.tier >= 1
     }
 
@@ -71,6 +99,30 @@ struct TitleChip: View {
             if hasSlot {
                 MotionBudget.shared.give()
                 hasSlot = false
+            }
+            poked = false
+            pokeTask?.cancel()
+        }
+        .onTapGesture { pokeMotion() }
+    }
+
+    /// 靜態稱號被點一下 → 讓它自己動 4 秒，之後回到靜止。
+    /// 這樣主頁可以全部靜態（不燒 CPU），想炫的時候點一下就有。
+    private func pokeMotion() {
+        guard !animated, title.tier >= 1, onScreen else { return }
+        if !hasSlot { hasSlot = MotionBudget.shared.take() }
+        guard hasSlot else { return }
+        poked = true
+        pokeTask?.cancel()
+        pokeTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                poked = false
+                if hasSlot {
+                    MotionBudget.shared.give()
+                    hasSlot = false
+                }
             }
         }
     }
@@ -126,8 +178,8 @@ struct TitleChip: View {
             .scaledToFit()
             .frame(height: bannerH)
             // ① 靜態牌體 + 外發光：這一層完全不隨時間變，SwiftUI 可以快取，陰影只算一次
-            .shadow(color: title.glow.opacity(0.46), radius: bannerH * 0.26, y: 0.5)
-            .shadow(color: title.glow.opacity(0.20), radius: bannerH * 0.60)
+            .modifier(ChipGlowShadow(color: title.glow, strength: 0.46,
+                                     radius: bannerH * 0.26, wide: live))
             // ② 牌後柔光：徑向，只到牌外一圈，不會形成方塊；呼吸只改這層的不透明度
             .background {
                 RadialGradient(colors: [title.glow.opacity(0.50),
@@ -187,8 +239,8 @@ struct TitleChip: View {
                 }
             }
             .overlay { if title.tier >= 4 { outerRing } }
-            .shadow(color: title.glow.opacity(shadowOpacity), radius: shadowRadius)
-            .shadow(color: title.glow.opacity(shadowOpacity * 0.55), radius: shadowRadius * 2.1)
+            .modifier(ChipGlowShadow(color: title.glow, strength: shadowOpacity,
+                                     radius: shadowRadius, wide: live))
             .fixedSize()
             .onAppear { onScreen = true }
             .onDisappear { onScreen = false }
@@ -519,6 +571,9 @@ struct TitleFlow: View {
     let owned: [String]
     var size: CGFloat = 1.0
     var spacing: CGFloat = 9
+    /// v47：主頁傳 false —— 整排稱號預設靜止（點一下才動），
+    /// 這是主頁掉幀最大的一筆開銷。編輯器、詳情頁仍可傳 true。
+    var animated: Bool = true
 
     private var list: [TitleDef] {
         owned.compactMap { Titles.find($0) }
@@ -527,7 +582,7 @@ struct TitleFlow: View {
     var body: some View {
         FlowLayout(spacing: spacing, lineSpacing: 10, alignment: .center) {
             ForEach(list) { t in
-                TitleChip(title: t, size: size)
+                TitleChip(title: t, size: size, animated: animated)
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)

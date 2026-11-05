@@ -81,6 +81,28 @@ struct AvatarBubble: View {
 
 // MARK: - 動態卡片
 
+/// v47：長按選單改成「需要才掛」。
+/// 主頁的卡片自己已經有垃圾桶按鈕，不需要再掛一層 UIKit 長按互動；
+/// 幾十張卡片各掛一個 contextMenu，等於幾十個互動區域要在滾動時維護，
+/// 這是主頁卡頓裡很容易被漏掉的一筆。
+private struct PostContextMenu: ViewModifier {
+    let enabled: Bool
+    let onDelete: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled, let onDelete {
+            content.contextMenu {
+                Button(role: .destructive) { onDelete() } label: {
+                    Label("刪除這則動態", systemImage: "trash")
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
 struct PostCard: View {
     let post: FeedPost
     var showAuthor: Bool = true
@@ -194,13 +216,7 @@ struct PostCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.8)
         )
-        .contextMenu {
-            if let onDelete {
-                Button(role: .destructive) { onDelete() } label: {
-                    Label("刪除這則動態", systemImage: "trash")
-                }
-            }
-        }
+        .modifier(PostContextMenu(enabled: showAuthor && onDelete != nil, onDelete: onDelete))
     }
 
     // MARK: 愛心 / 留言
@@ -454,6 +470,10 @@ struct VideoPlayerCard: View {
         .onAppear {
             if player == nil { player = AVPlayer(url: url) }
         }
+        .onDisappear {
+            // v47：滾出畫面就停手。這頁是常駐的，影片掛著不動也會一直佔解碼與記憶體。
+            player?.pause()
+        }
         .onTapGesture {
             player?.play()
         }
@@ -570,6 +590,8 @@ struct ProfilePageView: View {
     @State private var other: PublicUser?
     @State private var loading = true
     @State private var guestProfile = ""
+    /// v47：上次真正抓資料的時間，切分頁回來不必每次全量重拉
+    @State private var lastLoad = Date.distantPast
     // v44：原本 60 秒一次。刷新本身有網路往返，加上主頁重算，滑動時很容易撞上。
     // 會員等級／稱號這種資料本來就不會秒級變動，拉長到 5 分鐘，進頁面時另外還會刷一次。
     private let ticker = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
@@ -596,11 +618,30 @@ struct ProfilePageView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    header
-                    if !shownTitles.isEmpty { titleBox }
-                    if isMe { composeBar }
-                    feedSection
+                // v47：整頁改成「單一」LazyVStack。
+                // 原本是 VStack 裡再套 LazyVStack：外層 VStack 為了排版必須先問出
+                // LazyVStack 的總高度，這一問就把所有動態卡片（連圖片、光暈、陰影）
+                // 一次全建出來 —— 所謂懶載入等於沒生效。動態一多，進頁面就卡、
+                // 滾起來每一幀都在合成全部卡片，非常卡。
+                // 現在頭像、稱號、發佈列都當成這個 LazyVStack 的前幾項，
+                // 滾出畫面的卡片才會真的被回收、被釋放。
+                LazyVStack(spacing: 10) {
+                    header.padding(.bottom, 6)
+                    if !shownTitles.isEmpty { titleBox.padding(.bottom, 6) }
+                    if isMe { composeBar.padding(.bottom, 6) }
+                    feedTitle
+                    if posts.isEmpty && !loading { feedEmpty }
+                    ForEach(posts) { p in
+                        PostCard(post: p, showAuthor: false,
+                                 onDelete: isMe ? { Task { await remove(p) } } : nil,
+                                 social: social[p.id] ?? PostSocial(),
+                                 canInteract: store.authUserID != nil,
+                                 myUserID: store.authUserID,
+                                 onToggleLike: { Task { await toggleLike(p) } },
+                                 onSendComment: { text in Task { await addComment(p, text) } },
+                                 onDeleteComment: { c in Task { await removeComment(c, of: p.id) } })
+                        .frame(maxWidth: .infinity)
+                    }
                     Color.clear.frame(height: 96)
                 }
                 .padding(.horizontal, 16)
@@ -647,8 +688,14 @@ struct ProfilePageView: View {
                 TitleLayoutEditor(owned: shownTitles, layout: titleLayout)
             }
             .task(id: tabActive) {
-                // 只有這一頁真的顯示時才去拉資料，避免三頁同時開機搶頻寬
-                if tabActive { await reload() }
+                // 只有這一頁真的顯示時才去拉資料，避免三頁同時開機搶頻寬。
+                // v47：切回主頁不再每次都整頁重拉。原本每切回來一次就重新抓全部動態 +
+                // 社交資料，資料一回來整頁重建一次，正好撞在手指剛要滑的那一下 = 卡。
+                // 現在一分鐘內切來切去沿用現有資料，超過一分鐘才刷新。
+                guard tabActive else { return }
+                guard Date().timeIntervalSince(lastLoad) > 60 else { return }
+                lastLoad = Date()
+                await reload()
             }
             .onChange(of: titleLayout.order) { _ in scheduleLayoutPush() }
             .onChange(of: titleLayout.hidden) { _ in scheduleLayoutPush() }
@@ -743,7 +790,7 @@ struct ProfilePageView: View {
                     .buttonStyle(.plain)
                 }
             }
-            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 9)
+            TitleFlow(owned: visibleTitles, size: 1.0, spacing: 9, animated: false)
 
             if let f = Frames.equipped(in: shownTitles) {
                 HStack(spacing: 7) {
@@ -806,50 +853,38 @@ struct ProfilePageView: View {
         .buttonStyle(.plain)
     }
 
-    private var feedSection: some View {
-        // v44：動態改用 LazyVStack，滑到哪才長哪一張，不會一進頁面就把全部卡片連圖帶光暈一次算完
-        LazyVStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("動態")
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .tracking(1.6)
-                Spacer()
-                if loading { ProgressView().tint(.white.opacity(0.3)).scaleEffect(0.7) }
-            }
-            .padding(.horizontal, 2)
-            .padding(.top, 4)
-
-            if posts.isEmpty && !loading {
-                VStack(spacing: 6) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.white.opacity(0.16))
-                    Text(isMe ? "還沒有動態，發一則吧" : "這位用戶還沒有動態")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 34)
-            }
-
-            ForEach(posts) { p in
-                PostCard(post: p, showAuthor: false,
-                         onDelete: isMe ? { Task { await remove(p) } } : nil,
-                         social: social[p.id] ?? PostSocial(),
-                         canInteract: store.authUserID != nil,
-                         myUserID: store.authUserID,
-                         onToggleLike: { Task { await toggleLike(p) } },
-                         onSendComment: { text in Task { await addComment(p, text) } },
-                         onDeleteComment: { c in Task { await removeComment(c, of: p.id) } })
-            }
+    private var feedTitle: some View {
+        HStack {
+            Text("動態")
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundStyle(.white.opacity(0.35))
+                .tracking(1.6)
+            Spacer()
+            if loading { ProgressView().tint(.white.opacity(0.3)).scaleEffect(0.7) }
         }
+        .padding(.horizontal, 2)
+        .padding(.top, 4)
+    }
+
+    private var feedEmpty: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 24))
+                .foregroundStyle(.white.opacity(0.16))
+            Text(isMe ? "還沒有動態，發一則吧" : "這位用戶還沒有動態")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
     }
 
     // MARK: 資料
 
     private func reload() async {
-        await MainActor.run { loading = true }
+        // v47：只有第一次（還沒有資料）才顯示轉圈，之後靜默刷新，
+        // 避免每次刷新都讓整頁進一次「載入中」再重建。
+        await MainActor.run { if posts.isEmpty { loading = true } }
         if isMe {
             await store.refreshSocial()
             let uid = store.authUserID ?? ""
@@ -859,8 +894,10 @@ struct ProfilePageView: View {
             let smap = await SocialAPI.loadSocial(postIDs: list.map { $0.id },
                                                   myUserID: store.authUserID, token: token)
             await MainActor.run {
-                posts = list
-                social = smap
+                // v47：內容沒變就不要動 @State。原本無條件覆蓋，等於每次刷新都把
+                // 全部動態卡片重算一遍（圖片、留言區、光暈全跟著重建），滑到一半撞上就頓一下。
+                if posts != list { posts = list }
+                if social != smap { social = smap }
                 loading = false
             }
         } else {
@@ -870,9 +907,9 @@ struct ProfilePageView: View {
             let smap = await SocialAPI.loadSocial(postIDs: list.map { $0.id },
                                                   myUserID: store.authUserID, token: token)
             await MainActor.run {
-                other = u
-                posts = list
-                social = smap
+                if other != u { other = u }
+                if posts != list { posts = list }
+                if social != smap { social = smap }
                 loading = false
             }
         }
